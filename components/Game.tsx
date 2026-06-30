@@ -95,11 +95,13 @@ export default function Game() {
     const pickups: Pickup[] = [];
     interface Chest { group: THREE.Group; pos: THREE.Vector3; opened: boolean; glow: THREE.Mesh; lid: THREE.Group; }
     const chests: Chest[] = [];
+    interface Ground { group: THREE.Group; pos: THREE.Vector3; kind: "weapon" | "heal"; id: string; }
+    const grounds: Ground[] = [];
 
     const clearWorld = () => {
       worldGrp.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); const m = o.material; Array.isArray(m) ? m.forEach((x) => x.dispose()) : m.dispose(); } });
       while (worldGrp.children.length) worldGrp.remove(worldGrp.children[0]);
-      solids.length = 0; floors.length = 0; colliders.length = 0; spawnSpots.length = 0; spawns.length = 0; waterUpdaters.length = 0; bushZones.length = 0; doors.length = 0; pickups.length = 0; chests.length = 0;
+      solids.length = 0; floors.length = 0; colliders.length = 0; spawnSpots.length = 0; spawns.length = 0; waterUpdaters.length = 0; bushZones.length = 0; doors.length = 0; pickups.length = 0; chests.length = 0; grounds.length = 0;
     };
     const pushCol = (a: number, b: number, c: number, d: number): Col => { const col = { minx: a, minz: b, maxx: c, maxz: d }; colliders.push(col); return col; };
     const addSolid = (m: THREE.Mesh, col = true) => { worldGrp.add(m); solids.push(m); if (col) { const b = new THREE.Box3().setFromObject(m); pushCol(b.min.x, b.min.z, b.max.x, b.max.z); } };
@@ -114,6 +116,16 @@ export default function Game() {
     const makeWater = (x: number, z: number, w: number, d: number) => { const geo = new THREE.PlaneGeometry(w, d, Math.min(40, w / 3 | 0), Math.min(40, d / 3 | 0)); const mat = new THREE.MeshStandardMaterial({ color: 0x2f7596, transparent: true, opacity: 0.82, roughness: 0.12, metalness: 0.55 }); const m = new THREE.Mesh(geo, mat); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, z); m.receiveShadow = true; worldGrp.add(m); const base = Float32Array.from(geo.attributes.position.array); waterUpdaters.push((t) => { const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const ix = i * 3; p.setZ(i, Math.sin(base[ix] * 0.4 + t * 1.4) * 0.14 + Math.cos(base[ix + 1] * 0.4 + t * 1.1) * 0.14); } p.needsUpdate = true; }); };
     const makeMedkit = (x: number, z: number) => { const g = new THREE.Group(); const box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.6), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, emissive: 0x114411, emissiveIntensity: 0.4 })); const cm = new THREE.MeshStandardMaterial({ color: 0x22c55e }); const cv = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.34, 0.62), cm); const ch = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.62), cm); g.add(box, cv, ch); g.position.set(x, 0.9, z); worldGrp.add(g); pickups.push({ group: g, pos: new THREE.Vector3(x, 0.9, z), active: true, respawn: 0 }); };
 
+    const furnish = (cx: number, cz: number, w: number, d: number) => {
+      const wood = () => new THREE.MeshStandardMaterial({ color: 0x6e4a2c, roughness: 0.8 });
+      const place = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, col = false) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; if (col) addSolid(m, true); else { worldGrp.add(m); solids.push(m); } };
+      const rugCol = [0x7a2e2e, 0x2e4a7a, 0x2e7a4a][(Math.random() * 3) | 0];
+      const rug = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(w, d) * 0.5, Math.min(w, d) * 0.4), new THREE.MeshStandardMaterial({ color: rugCol, roughness: 1 })); rug.rotation.x = -Math.PI / 2; rug.position.set(cx, 0.12, cz); worldGrp.add(rug);
+      place(new THREE.BoxGeometry(1.2, 0.1, 0.7), wood(), cx, 0.9, cz - d / 4); place(new THREE.BoxGeometry(0.1, 0.8, 0.1), wood(), cx - 0.5, 0.45, cz - d / 4); place(new THREE.BoxGeometry(0.1, 0.8, 0.1), wood(), cx + 0.5, 0.45, cz - d / 4);
+      for (const ox of [-0.55, 0.55]) place(new THREE.BoxGeometry(0.4, 0.5, 0.4), wood(), cx + ox, 0.25, cz - d / 4 + 0.7);
+      place(new THREE.BoxGeometry(w * 0.5, 1.5, 0.3), new THREE.MeshStandardMaterial({ color: 0x5a3f24, roughness: 0.9 }), cx, 0.78, cz - d / 2 + 0.35, true);
+      for (let i = 0; i < 2; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), new THREE.MeshStandardMaterial({ color: 0x3a4a3a, metalness: 0.4, roughness: 0.5 })); bar.position.set(cx + (i ? 1 : -1) * w * 0.3, 0.45, cz + d * 0.3); bar.castShadow = true; addSolid(bar, true); }
+    };
     const doorWall = (cx: number, cz: number, w: number, d: number, base: string, H: number) => {
       const T = 0.3, doorW = 1.5, doorH = 2.3;
       const wmat = () => new THREE.MeshStandardMaterial({ map: winTex(base), roughness: 0.9 });
@@ -133,26 +145,23 @@ export default function Game() {
       const H = 3.2; doorWall(cx, cz, w, d, base, H);
       const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), new THREE.MeshStandardMaterial({ color: 0x6b5b48, roughness: 1 })); floor.position.set(cx, 0.05, cz); floor.receiveShadow = true; addFloor(floor);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.3, d + 0.4), new THREE.MeshStandardMaterial({ color: 0x7a3b2e, roughness: 0.95 })); roof.position.set(cx, H + 0.15, cz); roof.castShadow = true; worldGrp.add(roof); solids.push(roof);
-      // interior props
-      const table = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.7), new THREE.MeshStandardMaterial({ color: 0x6e4a2c })); table.position.set(cx, 0.9, cz - d / 4); addSolid(table, true);
-      makeCrate(cx + w / 4, cz + d / 4, 0.9);
+      furnish(cx, cz, w, d);
       spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
-    const makeTower = (cx: number, cz: number, w: number, d: number, base: string, storeys = 2) => {
-      const H = 3.4 * storeys; doorWall(cx, cz, w, d, base, H);
+    const makeTower = (cx: number, cz: number, w: number, d: number, base: string) => {
+      const H = 6.4; doorWall(cx, cz, w, d, base, H);
       const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 1 })); floor.position.set(cx, 0.05, cz); floor.receiveShadow = true; addFloor(floor);
-      // walkable roof
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(w, 0.3, d), new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 1 })); roof.position.set(cx, H, cz); roof.castShadow = true; roof.receiveShadow = true; addFloor(roof);
-      // roof railings (cover) leaving a gap on +x for stair arrival
+      // roof covers all but a +x gap strip (the internal stairwell exits there)
+      const gapW = 2.4; const roofW = w - gapW;
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(roofW, 0.3, d), new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 1 })); roof.position.set(cx - gapW / 2, H, cz); roof.castShadow = true; roof.receiveShadow = true; addFloor(roof);
       const rh = 1, rt = 0.25;
       const rail = (x: number, z: number, sx: number, sz: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, rh, sz), new THREE.MeshStandardMaterial({ color: 0x3a3a42 })); m.position.set(x, H + rh / 2, z); addSolid(m, true); };
-      rail(cx, cz - d / 2, w, rt); rail(cx - w / 2, cz, rt, d); rail(cx, cz + d / 2, w, rt);
-      // external staircase up +x side (rises front->back)
-      const steps = Math.round(H / 0.42); const stepH = H / steps, stepD = 0.7, sx = cx + w / 2 + 1.1, swid = 1.6;
-      for (let i = 0; i <= steps; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(swid, stepH, stepD), new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 1 })); st.position.set(sx, (i + 0.5) * stepH, cz + d / 2 - 0.4 - i * stepD); st.castShadow = true; st.receiveShadow = true; addFloor(st); }
-      // landing onto roof
-      const land = new THREE.Mesh(new THREE.BoxGeometry(swid + 0.6, 0.25, 1.4), new THREE.MeshStandardMaterial({ color: 0x4a4a52 })); land.position.set(cx + w / 2 - 0.2, H, cz - d / 2 + 1.2); addFloor(land);
+      rail(cx - gapW / 2, cz - d / 2, roofW, rt); rail(cx - gapW / 2, cz + d / 2, roofW, rt); rail(cx - w / 2, cz, rt, d);
+      // INTERNAL staircase: rises front->back inside the +x gap strip up to the roof
+      const stairX = cx + w / 2 - gapW / 2; const steps = Math.round(H / 0.42); const stepH = H / steps; const run = (d - 2.2) / steps;
+      for (let i = 0; i <= steps; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(1.8, stepH, Math.max(0.7, run + 0.25)), new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 1 })); st.position.set(stairX, (i + 0.5) * stepH, cz + d / 2 - 1.1 - i * run); st.castShadow = true; st.receiveShadow = true; addFloor(st); }
+      furnish(cx, cz - d * 0.15, w, d);
       spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
@@ -198,29 +207,31 @@ export default function Game() {
       if (idx === 0) {
         makeWater(40, -34, 60, 48);
         ring(46, 5, (x, z) => makeHouse(x, z, rand(7, 10), rand(7, 10), P.bld));
-        ring(70, 5, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld, 2));
+        ring(70, 5, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld));
         for (let i = 0; i < 80; i++) { const x = rand(-ARENA + 6, ARENA - 6), z = rand(-ARENA + 6, ARENA - 6); if (Math.hypot(x - 40, z + 34) > 32 && clearOf(x, z)) makeTree(x, z); }
         for (let i = 0; i < 50; i++) makeBush(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6), Math.random() > 0.5);
       } else if (idx === 1) {
         makeWater(0, -78, ARENA * 2, 70);
         ring(34, 6, (x, z) => makeHouse(x, z, rand(8, 11), rand(8, 11), P.bld));
-        ring(64, 8, (x, z) => makeTower(x, z, rand(10, 13), rand(10, 13), P.bld, 2));
+        ring(64, 8, (x, z) => makeTower(x, z, rand(10, 13), rand(10, 13), P.bld));
         for (let i = 0; i < 70; i++) makeCrate(rand(-70, 70), rand(-55, 80), rand(1.4, 2.8));
         for (let i = 0; i < 22; i++) makeBush(rand(-80, 80), rand(20, 80), Math.random() > 0.5);
       } else if (idx === 2) {
         ring(24, 7, (x, z) => makeHouse(x, z, rand(7, 10), rand(7, 10), P.bld));
-        ring(50, 9, (x, z) => makeTower(x, z, rand(8, 12), rand(8, 12), P.bld, 2));
+        ring(50, 9, (x, z) => makeTower(x, z, rand(8, 12), rand(8, 12), P.bld));
         ring(78, 11, (x, z) => makeHouse(x, z, rand(6, 9), rand(6, 9), P.bld));
         for (let i = 0; i < 55; i++) makeCrate(rand(-75, 75), rand(-75, 75), rand(1.2, 2.4));
         for (let i = 0; i < 24; i++) makeBush(rand(-75, 75), rand(-75, 75), Math.random() > 0.6);
       } else {
         makeWater(-46, 40, 50, 40);
         ring(30, 7, (x, z, i) => { makeHouse(x, z, rand(8, 11), rand(8, 11), P.bld); if (i % 2 === 0) makeWater(x * 1.4, z * 1.4, rand(6, 9), rand(5, 8)); });
-        ring(60, 8, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld, 2));
+        ring(60, 8, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld));
         for (let i = 0; i < 60; i++) makeTree(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6));
         for (let i = 0; i < 55; i++) makeBush(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6), Math.random() > 0.4);
       }
 
+      // outdoor props (rocks & barrels) for cover + realism
+      for (let i = 0; i < 26; i++) { const x = rand(-ARENA + 8, ARENA - 8), z = rand(-ARENA + 8, ARENA - 8); if (Math.hypot(x, z) < 11) continue; if (Math.random() < 0.5) { const rr = 0.6 + Math.random() * 1.2; const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rr, 0), new THREE.MeshStandardMaterial({ color: 0x6b6b70, roughness: 1, flatShading: true })); rock.position.set(x, rr * 0.5, z); rock.castShadow = true; rock.receiveShadow = true; addSolid(rock, true); } else { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 12), new THREE.MeshStandardMaterial({ color: [0x8a3b2e, 0x3a4a3a, 0x2e6a7a][(Math.random() * 3) | 0], metalness: 0.5, roughness: 0.5 })); bar.position.set(x, 0.55, z); bar.castShadow = true; addSolid(bar, true); } }
       // chests + medkits
       ring(38, 8, (x, z) => makeChest(x, z)); ring(64, 6, (x, z) => makeChest(x, z));
       for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2 + 0.3; const r = 20 + (i % 3) * 22; makeMedkit(Math.cos(a) * r, Math.sin(a) * r); }
@@ -253,15 +264,30 @@ export default function Game() {
     setViewModel("pistol");
 
     /* ---------- bots ---------- */
-    interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; }
+    interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; dead?: boolean; home?: THREE.Vector3; respawnAt?: number; }
     const bots: Bot[] = []; const botParts: THREE.Object3D[] = [];
     const pickRoam = () => new THREE.Vector3((Math.random() - 0.5) * ARENA * 1.7, 0, (Math.random() - 0.5) * ARENA * 1.7);
     const makeBot = (pos: THREE.Vector3, dummy: boolean) => {
-      const g = new THREE.Group(); const team = dummy ? 0xc9a23a : 0x9aa0a8; const skin = new THREE.MeshStandardMaterial({ color: 0xd9a878, roughness: 0.7 }); const vest = new THREE.MeshStandardMaterial({ color: team, roughness: 0.8 }); const dark = new THREE.MeshStandardMaterial({ color: 0x23262c, roughness: 0.85 }); const helmet = new THREE.MeshStandardMaterial({ color: dummy ? 0xc9a23a : 0x3a4a3a, roughness: 0.7 });
-      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.95, 0.42), vest); torso.position.y = 1.35; torso.name = "body"; const hips = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.4), dark); hips.position.y = 0.78; const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.42, 0.4), skin); head.position.y = 2.04; head.name = "head"; const hel = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.24, 0.46), helmet); hel.position.y = 2.22;
-      const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.82, 0.26), dark); lLeg.position.set(-0.16, 0.42, 0); const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.82, 0.26), dark); rLeg.position.set(0.16, 0.42, 0); const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.78, 0.2), vest); lArm.position.set(-0.46, 1.34, 0); const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.78, 0.2), vest); rArm.position.set(0.46, 1.34, 0.05); const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.6), dark); rifle.position.set(0.5, 1.25, -0.25);
-      [torso, hips, head, hel, lLeg, rLeg, lArm, rArm, rifle].forEach((m) => { m.castShadow = true; g.add(m); }); g.position.copy(pos); g.userData.legs = [lLeg, rLeg]; worldGrp.add(g);
-      const bot: Bot = { group: g, head, body: torso, hp: dummy ? 99999 : 100, speed: dummy ? 0 : 3 + Math.random() * 1.4, lastShot: 0, roam: pickRoam(), dummy }; bots.push(bot); botParts.push(torso, head); return bot;
+      const g = new THREE.Group();
+      const skin = new THREE.MeshStandardMaterial({ color: 0xc98d63, roughness: 0.75 });
+      const vestC = dummy ? 0xcf8a2a : 0x4b5320; const vest = new THREE.MeshStandardMaterial({ color: vestC, roughness: 0.85, metalness: 0.05 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x1d1f24, roughness: 0.8 }); const boot = new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.9 });
+      const helmet = new THREE.MeshStandardMaterial({ color: dummy ? 0xb8791f : 0x2f3a2a, roughness: 0.7, metalness: 0.1 });
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.86, 0.4), vest); torso.position.y = 1.4; torso.name = "body";
+      const rig = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.46), dark); rig.position.y = 1.45;
+      const hips = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.34, 0.4), dark); hips.position.y = 0.84;
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.42, 0.4), skin); head.position.y = 2.06; head.name = "head";
+      const hel = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), helmet); hel.position.y = 2.16;
+      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.04), dark); eyeL.position.set(-0.09, 2.06, 0.2); const eyeR = eyeL.clone(); eyeR.position.x = 0.09;
+      const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.8, 0.24), dark); lLeg.position.set(-0.15, 0.45, 0); const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.8, 0.24), dark); rLeg.position.set(0.15, 0.45, 0);
+      const lBoot = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.34), boot); lBoot.position.set(-0.15, 0.08, 0.04); const rBoot = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.34), boot); rBoot.position.set(0.15, 0.08, 0.04);
+      const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.18), vest); lArm.position.set(-0.36, 1.42, -0.12); lArm.rotation.x = -0.7;
+      const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.18), vest); rArm.position.set(0.32, 1.42, -0.12); rArm.rotation.x = -0.7;
+      const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.66), dark); rifle.position.set(0.0, 1.42, -0.42);
+      const rbar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.3, 8), dark); rbar.rotation.x = Math.PI / 2; rbar.position.set(0, 1.44, -0.8);
+      [torso, rig, hips, head, hel, eyeL, eyeR, lLeg, rLeg, lBoot, rBoot, lArm, rArm, rifle, rbar].forEach((m) => { m.castShadow = true; g.add(m); });
+      g.position.copy(pos); g.userData.legs = [lLeg, rLeg]; worldGrp.add(g);
+      const bot: Bot = { group: g, head, body: torso, hp: 100, speed: dummy ? 0 : 3 + Math.random() * 1.4, lastShot: 0, roam: pickRoam(), dummy, home: pos.clone() }; bots.push(bot); botParts.push(torso, head); return bot;
     };
     const removeBot = (i: number) => { const b = bots[i]; b.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); worldGrp.remove(b.group); [b.body, b.head].forEach((m) => { const k = botParts.indexOf(m); if (k >= 0) botParts.splice(k, 1); }); bots.splice(i, 1); };
 
@@ -300,7 +326,7 @@ export default function Game() {
         raycaster.set(origin, dir); raycaster.far = 500;
         const hits = raycaster.intersectObjects([...botParts, ...targetParts, ...solids], false);
         if (hits.length) { const h = hits[0]; if (p === 0 || w.pellets <= 3) addTracer(mw, h.point);
-          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0 && !bots[idx].dummy && !bots[idx].dying) { const head = h.object.name === "head"; bots[idx].hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (bots[idx].hp <= 0) { const b = bots[idx]; b.dying = true; b.dieAt = now() + 1000; const bi = botParts.indexOf(b.body); if (bi >= 0) botParts.splice(bi, 1); const hi = botParts.indexOf(b.head); if (hi >= 0) botParts.splice(hi, 1); state.kills++; state.score += head ? 150 : 100; } } else if (idx >= 0) { state.hits++; setHit((v) => v + 1); sfx("hit"); } }
+          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0) { const b = bots[idx]; if (!b.dying && !b.dead) { const head = h.object.name === "head"; b.hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (b.hp <= 0) { b.dying = true; b.dieAt = now() + (b.dummy ? 700 : 1000); const bi = botParts.indexOf(b.body); if (bi >= 0) botParts.splice(bi, 1); const hi = botParts.indexOf(b.head); if (hi >= 0) botParts.splice(hi, 1); if (b.dummy) state.score += 25; else { state.kills++; state.score += head ? 150 : 100; } } } } }
           else if (targetParts.includes(h.object)) { state.hits++; state.score += 50; setHit((v) => v + 1); sfx("hit"); const tg = targets.find((t) => t.mesh === h.object); if (tg) { tg.mesh.visible = false; window.setTimeout(() => { tg.mesh.visible = true; }, 700); } }
         } else if (p === 0) addTracer(mw, mw.clone().add(dir.multiplyScalar(250)));
       }
@@ -309,13 +335,20 @@ export default function Game() {
 
     /* ---------- inventory ops ---------- */
     const showToast = (msg: string) => { setToast(msg); toastT = now() + 2200; };
-    const addWeapon = (wId: string) => { let i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) i = state.equip; state.inv[i] = { type: "weapon", wId, ammo: WEAPONS[wId].mag, reserve: WEAPONS[wId].mag * 2 }; syncInv(); };
+    const addWeapon = (wId: string): boolean => { const i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return false; state.inv[i] = { type: "weapon", wId, ammo: WEAPONS[wId].mag, reserve: WEAPONS[wId].mag * 2 }; syncInv(); return true; };
     const giveAmmo = () => { for (const s of state.inv) if (s.type === "weapon" && s.wId) { const cap = WEAPONS[s.wId].mag * 5; s.reserve = Math.min(cap, (s.reserve ?? 0) + WEAPONS[s.wId].mag); } syncInv(); syncHud(true); };
-    const addHeal = (hId: string) => { let i = state.inv.findIndex((s) => s.type === "heal" && s.hId === hId); if (i >= 0) state.inv[i].count = (state.inv[i].count ?? 0) + 1; else { i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return; state.inv[i] = { type: "heal", hId, count: 1 }; } syncInv(); };
+    const dropGround = (kind: "weapon" | "heal", id: string, rarity: Rarity, pos: THREE.Vector3) => {
+      const g = new THREE.Group();
+      if (kind === "weapon") { const col = new THREE.Color(RARITY[rarity].c); const box = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.16, 0.16), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.5, metalness: 0.6, roughness: 0.4 })); const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.32, 8), new THREE.MeshStandardMaterial({ color: 0x222 })); bar.rotation.z = Math.PI / 2; bar.position.x = -0.36; g.add(box, bar); }
+      else { const box = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.32, 0.42), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x114411, emissiveIntensity: 0.4 })); const cm = new THREE.MeshStandardMaterial({ color: 0x22c55e }); const cv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.44), cm); const ch = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.44), cm); g.add(box, cv, ch); }
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.4, 1.6, 12, 1, true), new THREE.MeshBasicMaterial({ color: kind === "weapon" ? RARITY[rarity].c : "#22c55e", transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false })); beam.position.y = 0.6; g.add(beam);
+      g.position.set(pos.x, 0.6, pos.z); worldGrp.add(g); grounds.push({ group: g, pos: new THREE.Vector3(pos.x, 0.6, pos.z), kind, id });
+    };
+    const addHeal = (hId: string): boolean => { let i = state.inv.findIndex((s) => s.type === "heal" && s.hId === hId); if (i >= 0) { state.inv[i].count = (state.inv[i].count ?? 0) + 1; syncInv(); return true; } i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return false; state.inv[i] = { type: "heal", hId, count: 1 }; syncInv(); return true; };
     const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; setViewModel(s.wId!); syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
     const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; state.reloading = false; setViewModel(state.inv[state.equip].wId!); syncInv(); syncHud(true); };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
-    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; addWeapon(wId); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; addHeal(healId); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
+    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
 
     function now() { return performance.now(); }
     const tryInteract = () => {
@@ -395,12 +428,17 @@ export default function Game() {
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // medkit pickups
         for (const p of pickups) { if (p.active) { p.group.rotation.y += dt * 1.5; p.group.position.y = 0.9 + Math.sin(t * 2) * 0.12; if (state.hp < 100 && camera.position.distanceToSquared(p.pos) < 2.4) { state.hp = Math.min(100, state.hp + 30); p.active = false; p.group.visible = false; p.respawn = nowt + 18000; sfx("heal"); showToast("+30 HP"); syncHud(true); } } else if (nowt > p.respawn) { p.active = true; p.group.visible = true; } }
+        for (let gi = grounds.length - 1; gi >= 0; gi--) { const gd = grounds[gi]; gd.group.rotation.y += dt * 1.6; gd.group.position.y = 0.6 + Math.sin(t * 2 + gi) * 0.1; if (camera.position.distanceToSquared(gd.pos) < 2.8) { const ok = gd.kind === "weapon" ? addWeapon(gd.id) : addHeal(gd.id); if (ok) { sfx("loot"); showToast(`Picked up ${gd.kind === "weapon" ? WEAPONS[gd.id].name : HEALS[gd.id].name}`); worldGrp.remove(gd.group); gd.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); grounds.splice(gi, 1); } } }
         if (toastT && nowt > toastT) { toastT = 0; setToast(""); }
 
         if (!counting) {
           eye.copy(camera.position);
           for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
-          if (state.mode === "training") for (const b of bots) if (b.dummy) { tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); }
+          if (state.mode === "training") for (const b of bots) { if (!b.dummy) continue;
+            if (b.dead) { if (now() > (b.respawnAt || 0)) { b.dead = false; b.hp = 100; b.group.visible = true; b.group.rotation.set(0, 0, 0); if (b.home) b.group.position.copy(b.home); botParts.push(b.body, b.head); } continue; }
+            if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 7); if (now() > (b.dieAt || 0)) { b.dying = false; b.dead = true; b.group.visible = false; b.respawnAt = now() + 3000; } continue; }
+            tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z);
+          }
           if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; controls.unlock(); setPhase("win"); }
         }
 
