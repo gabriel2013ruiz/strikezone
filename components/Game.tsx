@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
-type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer";
+type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
@@ -18,17 +19,31 @@ const MAPS = [
 
 interface Weapon { name: string; abbr: string; dmg: number; rate: number; mag: number; auto: boolean; fov: number; spread: number; pellets: number; rarity: Rarity; }
 const WEAPONS: Record<string, Weapon> = {
-  pistol: { name: "Pistol", abbr: "PST", dmg: 26, rate: 240, mag: 12, auto: false, fov: 50, spread: 0.012, pellets: 1, rarity: "common" },
-  smg: { name: "SMG", abbr: "SMG", dmg: 17, rate: 70, mag: 30, auto: true, fov: 52, spread: 0.022, pellets: 1, rarity: "uncommon" },
-  rifle: { name: "Rifle", abbr: "RIF", dmg: 33, rate: 100, mag: 30, auto: true, fov: 44, spread: 0.008, pellets: 1, rarity: "rare" },
-  shotgun: { name: "Shotgun", abbr: "SHT", dmg: 11, rate: 650, mag: 6, auto: false, fov: 55, spread: 0.07, pellets: 9, rarity: "epic" },
-  sniper: { name: "Sniper", abbr: "SNP", dmg: 135, rate: 1200, mag: 5, auto: false, fov: 22, spread: 0.0, pellets: 1, rarity: "legendary" },
+  pistol: { name: "Pistol", abbr: "PST", dmg: 26, rate: 240, mag: 12, auto: false, fov: 46, spread: 0.012, pellets: 1, rarity: "common" },
+  smg: { name: "SMG", abbr: "SMG", dmg: 17, rate: 70, mag: 30, auto: true, fov: 50, spread: 0.022, pellets: 1, rarity: "uncommon" },
+  rifle: { name: "Rifle", abbr: "RIF", dmg: 33, rate: 100, mag: 30, auto: true, fov: 42, spread: 0.008, pellets: 1, rarity: "rare" },
+  ak: { name: "AK-47", abbr: "AK", dmg: 36, rate: 120, mag: 30, auto: true, fov: 42, spread: 0.013, pellets: 1, rarity: "rare" },
+  shotgun: { name: "Shotgun", abbr: "SHT", dmg: 12, rate: 650, mag: 6, auto: false, fov: 52, spread: 0.07, pellets: 9, rarity: "epic" },
+  lmg: { name: "LMG", abbr: "LMG", dmg: 24, rate: 80, mag: 60, auto: true, fov: 48, spread: 0.02, pellets: 1, rarity: "epic" },
+  sniper: { name: "Sniper", abbr: "SNP", dmg: 140, rate: 1200, mag: 5, auto: false, fov: 18, spread: 0.0, pellets: 1, rarity: "legendary" },
+  dmr: { name: "Marksman", abbr: "DMR", dmg: 72, rate: 340, mag: 10, auto: false, fov: 28, spread: 0.002, pellets: 1, rarity: "legendary" },
+};
+interface GunSpec { body: number; barrel: number; barrelR: number; mag: number; stock: boolean; scope: boolean; color: number; }
+const GUNSPEC: Record<string, GunSpec> = {
+  pistol: { body: 0.32, barrel: 0.14, barrelR: 0.03, mag: 0.2, stock: false, scope: false, color: 0x202227 },
+  smg: { body: 0.46, barrel: 0.2, barrelR: 0.03, mag: 0.28, stock: true, scope: false, color: 0x2a2d34 },
+  rifle: { body: 0.72, barrel: 0.42, barrelR: 0.035, mag: 0.3, stock: true, scope: false, color: 0x14161b },
+  ak: { body: 0.7, barrel: 0.4, barrelR: 0.04, mag: 0.34, stock: true, scope: false, color: 0x3a2a1a },
+  shotgun: { body: 0.68, barrel: 0.5, barrelR: 0.06, mag: 0.14, stock: true, scope: false, color: 0x3a2418 },
+  lmg: { body: 0.82, barrel: 0.55, barrelR: 0.045, mag: 0.42, stock: true, scope: false, color: 0x1a1c20 },
+  sniper: { body: 0.82, barrel: 0.62, barrelR: 0.028, mag: 0.2, stock: true, scope: true, color: 0x202830 },
+  dmr: { body: 0.7, barrel: 0.5, barrelR: 0.03, mag: 0.26, stock: true, scope: true, color: 0x26221c },
 };
 const RARITY: Record<Rarity, { c: string; w: number }> = { common: { c: "#9aa0a8", w: 44 }, uncommon: { c: "#37c871", w: 28 }, rare: { c: "#3a9bff", w: 16 }, epic: { c: "#b15bff", w: 9 }, legendary: { c: "#ffb01f", w: 3 } };
-const RAR_WEAPON: Record<Rarity, string> = { common: "pistol", uncommon: "smg", rare: "rifle", epic: "shotgun", legendary: "sniper" };
+const RAR_POOL: Record<Rarity, string[]> = { common: ["pistol"], uncommon: ["smg"], rare: ["rifle", "ak"], epic: ["shotgun", "lmg"], legendary: ["sniper", "dmr"] };
 const HEALS: Record<string, { name: string; icon: string; amt: number; rarity: Rarity }> = { bandaid: { name: "Bandaid", icon: "🩹", amt: 15, rarity: "common" }, medkit: { name: "Medkit", icon: "💊", amt: 40, rarity: "rare" } };
 
-interface Slot { type: "empty" | "weapon" | "heal"; wId?: string; ammo?: number; hId?: string; count?: number; }
+interface Slot { type: "empty" | "weapon" | "heal"; wId?: string; ammo?: number; reserve?: number; hId?: string; count?: number; }
 const emptyInv = (): Slot[] => Array.from({ length: 7 }, () => ({ type: "empty" as const }));
 
 function tex(draw: (c: CanvasRenderingContext2D, s: number) => void, size = 256, repeat = 1) {
@@ -41,7 +56,7 @@ export default function Game() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [mode, setMode] = useState<Mode>("single");
   const [mapIdx, setMapIdx] = useState(0);
-  const [hud, setHud] = useState({ hp: 100, ammo: 12, mag: 12, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, mode: "single" as Mode, alive: 0, wname: "Pistol" });
+  const [hud, setHud] = useState({ hp: 100, ammo: 12, mag: 12, reserve: 24, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, mode: "single" as Mode, alive: 0, wname: "Pistol" });
   const [inv, setInv] = useState<Slot[]>(emptyInv());
   const [equip, setEquip] = useState(0);
   const [hit, setHit] = useState(0); const [dmgFlash, setDmgFlash] = useState(0);
@@ -63,7 +78,11 @@ export default function Game() {
     const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.05, 1200); camera.position.set(0, 1.7, 0); scene.add(camera);
     const hemi = new THREE.HemisphereLight(0xbcd3ff, 0x4a4636, 0.8); scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2d6, 1.6); sun.position.set(80, 120, 50); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.camera.near = 1; sun.shadow.camera.far = 400;
-    const scam = sun.shadow.camera as THREE.OrthographicCamera; scam.left = -120; scam.right = 120; scam.top = 120; scam.bottom = -120; scene.add(sun);
+    const scam = sun.shadow.camera as THREE.OrthographicCamera; scam.left = -120; scam.right = 120; scam.top = 120; scam.bottom = -120; sun.shadow.bias = -0.0004; scene.add(sun);
+    // image-based lighting for realistic PBR reflections
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environmentIntensity = 0.35;
 
     const worldGrp = new THREE.Group(); scene.add(worldGrp);
     const solids: THREE.Object3D[] = []; const floors: THREE.Object3D[] = [];
@@ -74,7 +93,7 @@ export default function Game() {
     const doors: Door[] = [];
     interface Pickup { group: THREE.Group; pos: THREE.Vector3; active: boolean; respawn: number; }
     const pickups: Pickup[] = [];
-    interface Chest { group: THREE.Group; pos: THREE.Vector3; opened: boolean; glow: THREE.Mesh; }
+    interface Chest { group: THREE.Group; pos: THREE.Vector3; opened: boolean; glow: THREE.Mesh; lid: THREE.Group; }
     const chests: Chest[] = [];
 
     const clearWorld = () => {
@@ -137,17 +156,27 @@ export default function Game() {
       spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
-    const chestTexGlow = (c: string) => new THREE.MeshStandardMaterial({ color: c, emissive: new THREE.Color(c), emissiveIntensity: 0.7, roughness: 0.5, metalness: 0.3, transparent: true, opacity: 0.5 });
+    const woodTex = tex((c, s) => { c.fillStyle = "#6b4a26"; c.fillRect(0, 0, s, s); for (let i = 0; i < s; i += 22) { c.fillStyle = `rgba(0,0,0,${0.08 + Math.random() * 0.08})`; c.fillRect(0, i, s, 3); c.fillStyle = `rgba(255,220,170,${0.04})`; c.fillRect(0, i + 8, s, 2); } });
     const makeChest = (x: number, z: number) => {
       const g = new THREE.Group();
-      const woodLight = new THREE.MeshStandardMaterial({ color: 0x7a5a32, roughness: 0.8 });
-      const gold = new THREE.MeshStandardMaterial({ color: 0xc8a23a, metalness: 0.8, roughness: 0.4 });
-      const base = new THREE.Mesh(new THREE.BoxGeometry(1, 0.6, 0.7), woodLight); base.position.y = 0.3; base.castShadow = true;
-      const lid = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.3, 0.72), woodLight); lid.position.y = 0.72;
-      const lock = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.06), gold); lock.position.set(0, 0.6, 0.37);
-      const glow = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 1.0), chestTexGlow("#ffd24a")); glow.position.y = 0.5;
-      g.add(base, lid, lock, glow); g.position.set(x, 0, z); worldGrp.add(g);
-      chests.push({ group: g, pos: new THREE.Vector3(x, 0.6, z), opened: false, glow });
+      const wood = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.75, metalness: 0.05 });
+      const metal = new THREE.MeshStandardMaterial({ color: 0x4a4036, metalness: 0.9, roughness: 0.35 });
+      const gold = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 1, roughness: 0.25, emissive: 0x3a2e08, emissiveIntensity: 0.4 });
+      // base
+      const base = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.6, 0.74), wood); base.position.y = 0.32; base.castShadow = true; base.receiveShadow = true; g.add(base);
+      // metal bands on base
+      for (const bx of [-0.42, 0.42]) { const band = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.64, 0.78), metal); band.position.set(bx, 0.32, 0); g.add(band); }
+      // curved lid on a pivot (hinged at back)
+      const lid = new THREE.Group(); lid.position.set(0, 0.62, -0.37); g.add(lid);
+      const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 1.1, 16, 1, false, 0, Math.PI), wood); dome.rotation.z = Math.PI / 2; dome.position.set(0, 0, 0.37); dome.castShadow = true; lid.add(dome);
+      for (const bx of [-0.42, 0.42]) { const lband = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.035, 8, 16, Math.PI), metal); lband.rotation.y = Math.PI / 2; lband.position.set(bx, 0, 0.37); lid.add(lband); }
+      // gold lock + corners
+      const lock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.07), gold); lock.position.set(0, 0.5, 0.39); g.add(lock);
+      for (const cx of [-0.5, 0.5]) for (const cz of [-0.32, 0.32]) { const cor = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.62, 0.1), metal); cor.position.set(cx, 0.32, cz); g.add(cor); }
+      // glow aura (rises a beam)
+      const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 2.4, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })); glow.position.y = 1.2; g.add(glow);
+      g.position.set(x, 0, z); worldGrp.add(g);
+      chests.push({ group: g, pos: new THREE.Vector3(x, 0.6, z), opened: false, glow, lid });
       spawnSpots.push(new THREE.Vector3(x, 0, z));
     };
 
@@ -200,15 +229,31 @@ export default function Game() {
       scene.fog = new THREE.Fog(new THREE.Color(P.sky[1]).getHex(), 90, 240);
     };
 
-    /* ---------- gun ---------- */
-    const gun = new THREE.Group(); const gm = new THREE.MeshStandardMaterial({ color: 0x14161b, roughness: 0.4, metalness: 0.85 }); const gm2 = new THREE.MeshStandardMaterial({ color: 0x2a2d34, roughness: 0.6, metalness: 0.5 });
-    const gBody = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.72), gm); const gBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 10), gm); gBarrel.rotation.x = Math.PI / 2; gBarrel.position.set(0, 0.03, -0.62);
-    const gMag = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.3, 0.14), gm2); gMag.position.set(0, -0.22, 0.05); const gStock = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.26), gm2); gStock.position.set(0, -0.02, 0.46); const gGrip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.22, 0.12), gm2); gGrip.position.set(0, -0.16, 0.22); gGrip.rotation.x = 0.3; const gSight = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.22), gm); gSight.position.set(0, 0.12, -0.05);
-    gun.add(gBody, gBarrel, gMag, gStock, gGrip, gSight); gun.position.set(0.3, -0.26, -0.55); camera.add(gun);
-    const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.03, -0.92); gun.add(muzzle); const muzzleLight = new THREE.PointLight(0xffcc66, 0, 10); muzzle.add(muzzleLight);
+    /* ---------- gun (per-weapon view model) ---------- */
+    const gun = new THREE.Group(); gun.position.set(0.3, -0.26, -0.55); camera.add(gun);
+    const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.03, -0.92); gun.add(muzzle);
+    const muzzleLight = new THREE.PointLight(0xffcc66, 0, 10); muzzle.add(muzzleLight);
+    const gunParts: THREE.Mesh[] = [];
+    const setViewModel = (wId: string) => {
+      for (const p of gunParts) { gun.remove(p); p.geometry.dispose(); (p.material as THREE.Material).dispose(); }
+      gunParts.length = 0;
+      const sp = GUNSPEC[wId] || GUNSPEC.pistol;
+      const matMain = new THREE.MeshStandardMaterial({ color: sp.color, roughness: 0.45, metalness: 0.85 });
+      const matDark = new THREE.MeshStandardMaterial({ color: 0x1c1e23, roughness: 0.6, metalness: 0.6 });
+      const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); if (rx) m.rotation.x = rx; gun.add(m); gunParts.push(m); };
+      add(new THREE.BoxGeometry(0.14, 0.14, sp.body), matMain, 0, 0, 0);
+      add(new THREE.CylinderGeometry(sp.barrelR, sp.barrelR, sp.barrel, 12), matDark, 0, 0.02, -sp.body / 2 - sp.barrel / 2, Math.PI / 2);
+      add(new THREE.BoxGeometry(0.1, sp.mag, 0.13), matDark, 0, -sp.mag / 2 - 0.03, 0.05);
+      add(new THREE.BoxGeometry(0.09, 0.2, 0.12), matDark, 0, -0.14, 0.2, 0.3);
+      if (sp.stock) add(new THREE.BoxGeometry(0.1, 0.13, 0.28), matDark, 0, -0.03, sp.body / 2 + 0.14);
+      if (sp.scope) { add(new THREE.CylinderGeometry(0.055, 0.055, 0.34, 12), matDark, 0, 0.14, -0.08, Math.PI / 2); add(new THREE.BoxGeometry(0.04, 0.06, 0.05), matDark, 0, 0.1, -0.08); }
+      else add(new THREE.BoxGeometry(0.04, 0.06, 0.2), matMain, 0, 0.11, -0.04);
+      muzzle.position.set(0, 0.02, -sp.body / 2 - sp.barrel - 0.04);
+    };
+    setViewModel("pistol");
 
     /* ---------- bots ---------- */
-    interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; }
+    interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; }
     const bots: Bot[] = []; const botParts: THREE.Object3D[] = [];
     const pickRoam = () => new THREE.Vector3((Math.random() - 0.5) * ARENA * 1.7, 0, (Math.random() - 0.5) * ARENA * 1.7);
     const makeBot = (pos: THREE.Vector3, dummy: boolean) => {
@@ -229,19 +274,19 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
     const keys: Record<string, boolean> = {};
     const raycaster = new THREE.Raycaster(); const losRay = new THREE.Raycaster(); const downRay = new THREE.Raycaster(); const DOWN = new THREE.Vector3(0, -1, 0);
     const curW = () => { const s = state.inv[state.equip]; return s && s.type === "weapon" && s.wId ? WEAPONS[s.wId] : WEAPONS.pistol; };
     let lastHudSync = 0;
-    const syncHud = (force = false) => { const now = performance.now(); if (!force && now - lastHudSync < 80) return; lastHudSync = now; const s = state.inv[state.equip]; const w = curW(); setHud({ hp: Math.max(0, Math.round(state.hp)), ammo: s?.ammo ?? 0, mag: w.mag, score: state.score, kills: state.kills, shots: state.shots, hits: state.hits, reloading: state.reloading, mode: state.mode, alive: bots.filter((b) => !b.dummy).length, wname: w.name }); };
+    const syncHud = (force = false) => { const now = performance.now(); if (!force && now - lastHudSync < 80) return; lastHudSync = now; const s = state.inv[state.equip]; const w = curW(); setHud({ hp: Math.max(0, Math.round(state.hp)), ammo: s?.ammo ?? 0, mag: w.mag, reserve: s?.reserve ?? 0, score: state.score, kills: state.kills, shots: state.shots, hits: state.hits, reloading: state.reloading, mode: state.mode, alive: bots.filter((b) => !b.dummy && !b.dying).length, wname: w.name }); };
     const syncInv = () => { setInv(state.inv.map((s) => ({ ...s }))); setEquip(state.equip); };
     let lastAds = false, lastHidden = false, lastPrompt = "", toastT = 0, lastCount = 0;
 
     const tracers: { line: THREE.Line; life: number }[] = [];
     const addTracer = (from: THREE.Vector3, to: THREE.Vector3, color = 0xfff2a0) => { const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })); worldGrp.add(line); tracers.push({ line, life: 0.06 }); };
 
-    const reload = () => { const s = state.inv[state.equip]; if (s.type !== "weapon") return; const w = curW(); if (state.reloading || (s.ammo ?? 0) >= w.mag) return; state.reloading = true; syncHud(true); sfx("reload"); window.setTimeout(() => { s.ammo = w.mag; state.reloading = false; syncHud(true); }, 1100); };
+    const reload = () => { const s = state.inv[state.equip]; if (s.type !== "weapon") return; const w = curW(); if (state.reloading || (s.ammo ?? 0) >= w.mag || (s.reserve ?? 0) <= 0) return; state.reloading = true; syncHud(true); sfx("reload"); window.setTimeout(() => { const need = w.mag - (s.ammo ?? 0); const take = Math.min(need, s.reserve ?? 0); s.ammo = (s.ammo ?? 0) + take; s.reserve = (s.reserve ?? 0) - take; state.reloading = false; syncHud(true); }, 1100); };
     const shoot = () => {
       const s = state.inv[state.equip]; if (s.type !== "weapon" || !state.alive || state.reloading) return; const w = curW();
       if (now() < state.countEnd) return;
@@ -255,7 +300,7 @@ export default function Game() {
         raycaster.set(origin, dir); raycaster.far = 500;
         const hits = raycaster.intersectObjects([...botParts, ...targetParts, ...solids], false);
         if (hits.length) { const h = hits[0]; if (p === 0 || w.pellets <= 3) addTracer(mw, h.point);
-          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0 && !bots[idx].dummy) { const head = h.object.name === "head"; bots[idx].hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (bots[idx].hp <= 0) { const spn = (spawns.length ? spawns[(Math.random() * spawns.length) | 0].clone() : pickRoam()); removeBot(idx); state.kills++; state.score += head ? 150 : 100; if (state.mode === "single") window.setTimeout(() => { if (state.alive) makeBot(spn, false); }, 2500); } } else if (idx >= 0) { state.hits++; setHit((v) => v + 1); sfx("hit"); } }
+          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0 && !bots[idx].dummy && !bots[idx].dying) { const head = h.object.name === "head"; bots[idx].hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (bots[idx].hp <= 0) { const b = bots[idx]; b.dying = true; b.dieAt = now() + 1000; const bi = botParts.indexOf(b.body); if (bi >= 0) botParts.splice(bi, 1); const hi = botParts.indexOf(b.head); if (hi >= 0) botParts.splice(hi, 1); state.kills++; state.score += head ? 150 : 100; } } else if (idx >= 0) { state.hits++; setHit((v) => v + 1); sfx("hit"); } }
           else if (targetParts.includes(h.object)) { state.hits++; state.score += 50; setHit((v) => v + 1); sfx("hit"); const tg = targets.find((t) => t.mesh === h.object); if (tg) { tg.mesh.visible = false; window.setTimeout(() => { tg.mesh.visible = true; }, 700); } }
         } else if (p === 0) addTracer(mw, mw.clone().add(dir.multiplyScalar(250)));
       }
@@ -264,12 +309,13 @@ export default function Game() {
 
     /* ---------- inventory ops ---------- */
     const showToast = (msg: string) => { setToast(msg); toastT = now() + 2200; };
-    const addWeapon = (wId: string) => { let i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) i = state.equip; state.inv[i] = { type: "weapon", wId, ammo: WEAPONS[wId].mag }; syncInv(); };
+    const addWeapon = (wId: string) => { let i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) i = state.equip; state.inv[i] = { type: "weapon", wId, ammo: WEAPONS[wId].mag, reserve: WEAPONS[wId].mag * 2 }; syncInv(); };
+    const giveAmmo = () => { for (const s of state.inv) if (s.type === "weapon" && s.wId) { const cap = WEAPONS[s.wId].mag * 5; s.reserve = Math.min(cap, (s.reserve ?? 0) + WEAPONS[s.wId].mag); } syncInv(); syncHud(true); };
     const addHeal = (hId: string) => { let i = state.inv.findIndex((s) => s.type === "heal" && s.hId === hId); if (i >= 0) state.inv[i].count = (state.inv[i].count ?? 0) + 1; else { i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return; state.inv[i] = { type: "heal", hId, count: 1 }; } syncInv(); };
-    const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
-    const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; syncInv(); syncHud(true); };
+    const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; setViewModel(s.wId!); syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
+    const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; state.reloading = false; setViewModel(state.inv[state.equip].wId!); syncInv(); syncHud(true); };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
-    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; (c.group.children[1] as THREE.Mesh).rotation.x = -0.8; const r = rollRarity(); const wId = RAR_WEAPON[r]; addWeapon(wId); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; addHeal(healId); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name}`); };
+    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; addWeapon(wId); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; addHeal(healId); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
 
     function now() { return performance.now(); }
     const tryInteract = () => {
@@ -294,11 +340,11 @@ export default function Game() {
       for (let i = bots.length - 1; i >= 0; i--) removeBot(i); targets.length = 0; targetParts.length = 0;
       buildMap(idx);
       state.hp = 100; state.score = 0; state.kills = 0; state.shots = 0; state.hits = 0; state.reloading = false; state.alive = true; state.mode = m; state.vel.set(0, 0, 0);
-      state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag }; state.equip = 0; syncInv();
+      state.won = false; state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag, reserve: WEAPONS.pistol.mag * 2 }; state.equip = 0; setViewModel("pistol"); syncInv();
       // varied spawn near cover
       const sp = spawnSpots.length ? spawnSpots[(Math.random() * spawnSpots.length) | 0] : new THREE.Vector3(0, 0, 0);
       camera.position.set(sp.x + (Math.random() - 0.5) * 2, 1.7, sp.z + 2.5); camera.rotation.set(0, Math.atan2(-sp.x, -sp.z), 0);
-      if (m === "single") { for (let i = 0; i < 6; i++) makeBot((spawns[i % spawns.length] || pickRoam()).clone(), false); }
+      if (m === "single") { for (let i = 0; i < 10; i++) makeBot((spawns[i % spawns.length] || pickRoam()).clone(), false); }
       else { for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; makeTarget(new THREE.Vector3(Math.cos(a) * (16 + (i % 3) * 7), 0, Math.sin(a) * (16 + (i % 3) * 7))); } for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.4; makeBot(new THREE.Vector3(Math.cos(a) * 28, 0, Math.sin(a) * 28), true); } }
       state.countEnd = now() + 3000; syncHud(true);
     };
@@ -353,8 +399,9 @@ export default function Game() {
 
         if (!counting) {
           eye.copy(camera.position);
-          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
+          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
           if (state.mode === "training") for (const b of bots) if (b.dummy) { tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); }
+          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; controls.unlock(); setPhase("win"); }
         }
 
         if (state.ads !== lastAds) { lastAds = state.ads; setAiming(state.ads); }
@@ -366,7 +413,7 @@ export default function Game() {
     };
     animate();
 
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("keyup", onKeyUp); document.removeEventListener("mousedown", onMouseDown); document.removeEventListener("mouseup", onMouseUp); document.removeEventListener("wheel", onWheel); document.removeEventListener("contextmenu", onContext); controls.dispose(); renderer.dispose(); if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); if (actx) actx.close().catch(() => {}); };
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("keyup", onKeyUp); document.removeEventListener("mousedown", onMouseDown); document.removeEventListener("mouseup", onMouseUp); document.removeEventListener("wheel", onWheel); document.removeEventListener("contextmenu", onContext); controls.dispose(); renderer.dispose(); pmrem.dispose(); if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); if (actx) actx.close().catch(() => {}); };
   }, []);
 
   const lowHp = hud.hp <= 30; const acc = hud.shots ? Math.round((hud.hits / hud.shots) * 100) : 0;
@@ -409,14 +456,14 @@ export default function Game() {
 
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-end justify-between p-5 hud-shadow">
             <div className="w-56"><div className="mb-1 flex justify-between text-xs"><span className={lowHp ? "text-red-400" : "text-emerald-300"}>HP</span><span>{hud.hp}</span></div><div className="h-3 w-full overflow-hidden rounded-full bg-white/10"><div className={`h-full transition-all ${lowHp ? "bg-red-500" : "bg-emerald-400"}`} style={{ width: `${hud.hp}%` }} /></div><div className="mt-1.5 text-[11px] opacity-60">📦 open chests (E) for guns · 1-7 use slots · scroll = swap gun</div></div>
-            <div className="text-right"><div className="text-3xl font-bold tabular-nums">{hud.reloading ? <span className="text-xl text-yellow-300">RELOADING…</span> : <>{hud.ammo}<span className="text-base opacity-50"> / {hud.mag}</span></>}</div><div className="text-xs opacity-60">🔫 {hud.wname} <span className="opacity-50">(R reload · RMB aim)</span></div></div>
+            <div className="text-right"><div className="text-3xl font-bold tabular-nums">{hud.reloading ? <span className="text-xl text-yellow-300">RELOADING…</span> : <>{hud.ammo}<span className={`text-base ${hud.reserve <= 0 ? "text-red-400" : "opacity-50"}`}> / {hud.reserve} spare</span></>}</div><div className="text-xs opacity-60">🔫 {hud.wname} <span className="opacity-50">(R reload · RMB aim)</span></div></div>
           </div>
         </>
       )}
 
       {phase === "menu" && (
         <Overlay><Title /><p className="mt-2 text-sm text-white/55">Pick a mode and a map.</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="Loot chests, fight bots" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
+          <div className="mt-6 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
           <p className="mt-7 text-xs uppercase tracking-widest text-white/50">Map</p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-44 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
           <PlayButton label="▶ CLICK TO PLAY" onClick={() => apiRef.current?.start(mode, mapIdx)} /><Controls />
@@ -424,6 +471,7 @@ export default function Game() {
       )}
       {phase === "multiplayer" && (<Overlay><h2 className="text-3xl font-bold tracking-widest text-cyan-300">🌐 ONLINE MULTIPLAYER</h2><p className="mt-4 max-w-md text-center text-sm text-white/70">Real-time online play needs a dedicated game server (WebSockets + netcode) that Vercel can&apos;t host. It&apos;s <span className="text-yellow-300">coming soon</span> — needs a separate realtime backend (Colyseus/Socket.IO on Railway/Fly.io).</p><PlayButton label="← Back" onClick={() => setPhase("menu")} /></Overlay>)}
       {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
+      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
       {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-3 text-lg">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
     </div>
   );
