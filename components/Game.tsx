@@ -9,7 +9,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
-type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop";
+type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
@@ -73,6 +73,12 @@ interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]
 const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 } });
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
+interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; crosshair: string; binds: Record<string, string>; }
+const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["interact", "Open chest"], ["kick", "Kick ball"]];
+const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, crosshair: "#ffffff", binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", interact: "KeyE", kick: "KeyF" } });
+function loadSettings(): Settings { try { const raw = localStorage.getItem("sz_settings"); if (raw) { const p = JSON.parse(raw); return { ...defaultSettings(), ...p, binds: { ...defaultSettings().binds, ...(p.binds || {}) } }; } } catch {} return defaultSettings(); }
+function saveSettings(s: Settings) { try { localStorage.setItem("sz_settings", JSON.stringify(s)); } catch {} }
+function keyLabel(c: string) { const m: Record<string, string> = { Space: "Space", ShiftLeft: "Shift", ShiftRight: "RShift", ControlLeft: "Ctrl", ControlRight: "RCtrl", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" }; if (m[c]) return m[c]; return c.replace("Key", "").replace("Digit", ""); }
 const RARITY_ORDER: Rarity[] = ["common", "uncommon", "rare", "epic", "legendary"];
 type Reward = { kind: "weapon" | "skin" | "potion" | "coins"; id: string; amount?: number; rarity: Rarity };
 function openCrateReward(crate: Rarity, m: Meta): Reward {
@@ -116,6 +122,10 @@ export default function Game() {
   const [crateOpening, setCrateOpening] = useState<Rarity | null>(null);
   const metaRef = useRef<Meta>(defaultMeta());
   const applyMeta = (m: Meta) => { metaRef.current = m; setMeta(m); saveMeta(m); };
+  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [rebind, setRebind] = useState<string | null>(null);
+  const settingsRef = useRef<Settings>(defaultSettings());
+  const applySettings = (s: Settings) => { settingsRef.current = s; setSettings(s); saveSettings(s); };
   const buySkin = (id: string) => { const s = SKINS[id]; if (!s || s.crateOnly || meta.skins.includes(id) || meta.coins < s.price) return; applyMeta({ ...meta, coins: meta.coins - s.price, skins: [...meta.skins, id], skin: id }); };
   const equipSkin = (id: string) => { if (!meta.skins.includes(id)) return; applyMeta({ ...meta, skin: id }); };
   const buyPotion = (id: string) => { const p = POTIONS[id]; if (!p || meta.coins < p.price) return; applyMeta({ ...meta, coins: meta.coins - p.price, potions: { ...meta.potions, [id]: (meta.potions[id] || 0) + 1 } }); };
@@ -137,7 +147,13 @@ export default function Game() {
   const apiRef = useRef<{ start: (mode: Mode, map: number) => void } | null>(null);
   const phaseRef = useRef<Phase>("menu"); phaseRef.current = phase;
 
-  useEffect(() => { const m = loadMeta(); metaRef.current = m; setMeta(m); }, []);
+  useEffect(() => { const m = loadMeta(); metaRef.current = m; setMeta(m); const s = loadSettings(); settingsRef.current = s; setSettings(s); }, []);
+  useEffect(() => {
+    if (!rebind) return;
+    const h = (e: KeyboardEvent) => { e.preventDefault(); applySettings({ ...settings, binds: { ...settings.binds, [rebind]: e.code } }); setRebind(null); };
+    window.addEventListener("keydown", h, { once: true });
+    return () => window.removeEventListener("keydown", h);
+  }, [rebind, settings]);
 
   useEffect(() => {
     const mount = mountRef.current; if (!mount) return;
@@ -214,11 +230,10 @@ export default function Game() {
       const segW = (w - doorW) / 2;
       wall(cx - (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T); wall(cx + (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T);
       wall(cx, doorH + (H - doorH) / 2, cz + d / 2, doorW, H - doorH, T, false);
-      const pivot = new THREE.Group(); pivot.position.set(cx - doorW / 2, 0, cz + d / 2); worldGrp.add(pivot);
-      const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.08), new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 })); door.position.set(doorW / 2, doorH / 2, 0); door.castShadow = true; pivot.add(door); solids.push(door);
+      // door hangs permanently OPEN (no collider) — doorways are always-clear passages, no barrier
+      const pivot = new THREE.Group(); pivot.position.set(cx - doorW / 2, 0, cz + d / 2); pivot.rotation.y = -1.4; worldGrp.add(pivot);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.08), new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 })); door.position.set(doorW / 2, doorH / 2, 0); door.castShadow = true; pivot.add(door);
       const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 1, roughness: 0.3 })); knob.position.set(doorW - 0.15, doorH / 2, 0.08); pivot.add(knob);
-      const col = pushCol(cx - doorW / 2, cz + d / 2 - 0.1, cx + doorW / 2, cz + d / 2 + 0.1);
-      doors.push({ pivot, open: false, target: 0, col, saved: { ...col }, pos: pivot.position.clone() });
     };
 
     const makeHouse = (cx: number, cz: number, w: number, d: number, base: string) => {
@@ -418,7 +433,7 @@ export default function Game() {
     const makeTarget = (pos: THREE.Vector3) => { const g = new THREE.Group(); const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0x333 })); stand.position.y = 0.6; const board = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), new THREE.MeshStandardMaterial({ map: targetTex, roughness: 0.7, side: THREE.DoubleSide })); board.position.y = 1.5; board.name = "target"; g.add(stand, board); g.position.copy(pos); worldGrp.add(g); targets.push({ mesh: board }); targetParts.push(board); };
 
     let actx: AudioContext | null = null;
-    const sfx = (k: "shoot" | "hit" | "head" | "hurt" | "reload" | "enemy" | "heal" | "door" | "loot") => { try { if (!actx) actx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain(); o.connect(g); g.connect(actx.destination); const cfg = { shoot: [220, "square", 0.1, 0.07], hit: [620, "sine", 0.13, 0.05], head: [950, "sine", 0.18, 0.09], hurt: [110, "sawtooth", 0.2, 0.18], reload: [320, "triangle", 0.09, 0.05], enemy: [180, "square", 0.05, 0.06], heal: [520, "sine", 0.16, 0.22], door: [140, "triangle", 0.12, 0.18], loot: [660, "triangle", 0.16, 0.3] }[k] as [number, OscillatorType, number, number]; o.type = cfg[1]; o.frequency.setValueAtTime(cfg[0], t); if (k === "shoot") o.frequency.exponentialRampToValueAtTime(80, t + cfg[3]); if (k === "heal" || k === "loot") o.frequency.exponentialRampToValueAtTime(990, t + cfg[3]); g.gain.setValueAtTime(cfg[2], t); g.gain.exponentialRampToValueAtTime(0.001, t + cfg[3]); o.start(t); o.stop(t + cfg[3]); } catch {} };
+    const sfx = (k: "shoot" | "hit" | "head" | "hurt" | "reload" | "enemy" | "heal" | "door" | "loot") => { if (!settingsRef.current.sfx) return; try { if (!actx) actx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain(); o.connect(g); g.connect(actx.destination); const cfg = { shoot: [220, "square", 0.1, 0.07], hit: [620, "sine", 0.13, 0.05], head: [950, "sine", 0.18, 0.09], hurt: [110, "sawtooth", 0.2, 0.18], reload: [320, "triangle", 0.09, 0.05], enemy: [180, "square", 0.05, 0.06], heal: [520, "sine", 0.16, 0.22], door: [140, "triangle", 0.12, 0.18], loot: [660, "triangle", 0.16, 0.3] }[k] as [number, OscillatorType, number, number]; o.type = cfg[1]; o.frequency.setValueAtTime(cfg[0], t); if (k === "shoot") o.frequency.exponentialRampToValueAtTime(80, t + cfg[3]); if (k === "heal" || k === "loot") o.frequency.exponentialRampToValueAtTime(990, t + cfg[3]); g.gain.setValueAtTime(cfg[2] * settingsRef.current.volume, t); g.gain.exponentialRampToValueAtTime(0.001, t + cfg[3]); o.start(t); o.stop(t + cfg[3]); } catch {} };
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
@@ -488,7 +503,7 @@ export default function Game() {
     };
     const tryKick = () => { if (!soccer || soccer.kicking || !state.alive) return; if (camera.position.distanceTo(soccer.home) > 3.8) return; if (state.kills - state.lastKickKills < 4) return; soccer.kicking = true; soccer.kickStart = now(); state.invuln = true; sfx("shoot"); showToast("⚽ KICK!"); };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.camMode = (state.camMode + 1) % 3; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); if (e.code === "KeyF") tryKick(); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === B.reload) reload(); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.camMode = (state.camMode + 1) % 3; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -534,23 +549,26 @@ export default function Game() {
 
       if (playing) {
         // crouch + vertical
-        state.crouchAmt += ((keys["KeyC"] || keys["ControlLeft"] ? 1 : 0) - state.crouchAmt) * Math.min(1, dt * 10);
+        controls.pointerSpeed = settingsRef.current.sens;
+        renderer.shadowMap.enabled = settingsRef.current.shadows;
+        state.crouchAmt += ((keys[settingsRef.current.binds.crouch] || keys["ControlLeft"] ? 1 : 0) - state.crouchAmt) * Math.min(1, dt * 10);
         const eyeH = 1.7 - state.crouchAmt * 0.75;
         rayOrig.set(camera.position.x, camera.position.y + 0.3, camera.position.z); downRay.set(rayOrig, DOWN); downRay.far = 80;
         const fh = downRay.intersectObjects(floors, false); let groundY = 0; if (fh.length) groundY = fh[0].point.y;
         const feetEye = groundY + eyeH;
 
         if (!counting) {
-          const sprint = keys["ShiftLeft"] ? 1.7 : 1; const spd = nowt < state.speedUntil ? 1.5 : 1; const accel = 58 * sprint * spd * (1 - 0.45 * state.crouchAmt), damp = 9;
+          const B = settingsRef.current.binds;
+          const sprint = keys[B.sprint] ? 1.7 : 1; const spd = nowt < state.speedUntil ? 1.5 : 1; const accel = 58 * sprint * spd * (1 - 0.45 * state.crouchAmt), damp = 9;
           state.vel.x -= state.vel.x * damp * dt; state.vel.z -= state.vel.z * damp * dt;
-          const fwd = (keys["KeyW"] ? 1 : 0) - (keys["KeyS"] ? 1 : 0); const side = (keys["KeyD"] ? 1 : 0) - (keys["KeyA"] ? 1 : 0);
+          const fwd = (keys[B.forward] ? 1 : 0) - (keys[B.back] ? 1 : 0); const side = (keys[B.right] ? 1 : 0) - (keys[B.left] ? 1 : 0);
           if (fwd) state.vel.z -= fwd * accel * dt; if (side) state.vel.x += side * accel * dt;
           controls.moveRight(state.vel.x * dt); controls.moveForward(-state.vel.z * dt); collide(camera.position, 0.5);
         }
         state.vel.y -= 20 * dt; camera.position.y += state.vel.y * dt;
         if (camera.position.y <= feetEye) { camera.position.y = feetEye; state.vel.y = 0; state.canJump = true; }
 
-        const w = curW(); const targetFov = state.ads ? w.fov : 80;
+        const w = curW(); const targetFov = state.ads ? w.fov : settingsRef.current.fov;
         camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12); camera.updateProjectionMatrix();
         gun.position.x += (((state.ads ? 0.0 : 0.3)) - gun.position.x) * Math.min(1, dt * 12); gun.position.y += (((state.ads ? -0.14 : -0.26)) - gun.position.y) * Math.min(1, dt * 12);
         gun.position.z += (-0.55 - gun.position.z) * Math.min(1, dt * 13); gun.rotation.x += (0 - gun.rotation.x) * Math.min(1, dt * 13);
@@ -630,7 +648,7 @@ export default function Game() {
           camera.lookAt(savedCam.x, savedCam.y - 0.25, savedCam.z);
         }
       } else { playerModel.visible = false; gun.visible = true; }
-      composer.render();
+      if (settingsRef.current.bloom) composer.render(); else renderer.render(scene, camera);
       if (savedCam) camera.position.copy(savedCam); if (savedQuat) camera.quaternion.copy(savedQuat);
     };
     animate();
@@ -652,8 +670,8 @@ export default function Game() {
           {/* countdown */}
           {count > 0 && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="text-8xl font-black text-cyan-300 hud-shadow" style={{ textShadow: "0 0 30px rgba(0,200,255,0.7)" }}>{count}</div></div>}
 
-          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-red-400" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-white/80" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-white/80" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-white/80" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-white/80" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" /></div>)}
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: settings.crosshair }}>
+            {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
           </div>
           {hit > 0 && <div key={hit} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-45" style={{ animation: "fadeIn 0.18s ease forwards reverse" }}><div className="relative h-7 w-7"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-red-400" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-red-400" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-red-400" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-red-400" /></div></div>}
 
@@ -709,13 +727,13 @@ export default function Game() {
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
               <span className="rounded-full bg-yellow-400/15 px-3 py-1.5 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
               <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button>
-              <button onClick={() => setShowControls(true)} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">⌨ CONTROLS</button>
+              <button onClick={() => setPhase("settings")} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">⚙️ SETTINGS</button>
             </div>
             <p className="mt-6 text-[11px] uppercase tracking-[0.3em] text-white/40">Mode</p>
             <div className="mt-2 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
             <p className="mt-5 text-[11px] uppercase tracking-[0.3em] text-white/40">Map</p>
             <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-40 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
-            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-8 w-full rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 py-5 text-4xl font-black tracking-wider text-black transition hover:scale-[1.02] hover:brightness-110" style={{ boxShadow: "0 0 55px -6px rgba(0,200,255,0.85)" }}>▶ PLAY</button>
+            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-7 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-14 py-3.5 text-2xl font-black tracking-wider text-black transition hover:scale-105 hover:brightness-110" style={{ boxShadow: "0 0 40px -8px rgba(0,200,255,0.8)" }}>▶ PLAY</button>
             <p className="mt-2 text-[11px] text-white/40">Click Play, then move your mouse to look around</p>
           </div>
         </Overlay>
@@ -814,10 +832,45 @@ export default function Game() {
         </div>
       )}
 
+      {phase === "settings" && (
+        <div className="fade-in absolute inset-0 z-10 overflow-y-auto bg-black/92 backdrop-blur-sm">
+          <div className="mx-auto max-w-2xl px-5 py-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-black tracking-widest">⚙️ SETTINGS</h2>
+              <button onClick={() => { setRebind(null); setPhase("menu"); }} className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/10">← Back</button>
+            </div>
+            <Section title="🔊 Audio">
+              <Slider label="Master volume" min={0} max={1} step={0.05} value={settings.volume} onChange={(v) => applySettings({ ...settings, volume: v })} fmt={(v) => `${Math.round(v * 100)}%`} />
+              <Toggle label="Sound effects" on={settings.sfx} onClick={() => applySettings({ ...settings, sfx: !settings.sfx })} />
+            </Section>
+            <Section title="🎨 Graphics">
+              <Toggle label="Shadows" on={settings.shadows} onClick={() => applySettings({ ...settings, shadows: !settings.shadows })} />
+              <Toggle label="Bloom / glow" on={settings.bloom} onClick={() => applySettings({ ...settings, bloom: !settings.bloom })} />
+              <Slider label="Field of view" min={60} max={110} step={1} value={settings.fov} onChange={(v) => applySettings({ ...settings, fov: v })} fmt={(v) => `${v}°`} />
+            </Section>
+            <Section title="🖱️ Mouse & Crosshair">
+              <Slider label="Mouse sensitivity" min={0.2} max={3} step={0.1} value={settings.sens} onChange={(v) => applySettings({ ...settings, sens: v })} fmt={(v) => v.toFixed(1)} />
+              <div className="flex items-center justify-between py-1.5"><span className="text-sm">Crosshair color</span><input type="color" value={settings.crosshair} onChange={(e) => applySettings({ ...settings, crosshair: e.target.value })} className="h-8 w-14 cursor-pointer rounded bg-transparent" /></div>
+            </Section>
+            <Section title="🎮 Controls — click a key to rebind">
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {BIND_ACTIONS.map(([act, label]) => (
+                  <button key={act} onClick={() => setRebind(act)} className="flex items-center justify-between rounded-lg border border-white/15 px-3 py-2 text-sm transition hover:border-cyan-400/60">
+                    <span className="text-white/70">{label}</span>
+                    <span className={`rounded px-2 py-0.5 font-bold ${rebind === act ? "animate-pulse bg-cyan-400 text-black" : "bg-white/10 text-cyan-200"}`}>{rebind === act ? "press a key…" : keyLabel(settings.binds[act])}</span>
+                  </button>
+                ))}
+              </div>
+            </Section>
+            <button onClick={() => applySettings(defaultSettings())} className="mt-6 w-full rounded-lg border border-red-400/40 py-2.5 text-sm font-bold text-red-300 hover:bg-red-500/10">Reset all to defaults</button>
+          </div>
+        </div>
+      )}
+
       {phase === "multiplayer" && (<Overlay><h2 className="text-3xl font-bold tracking-widest text-cyan-300">🌐 ONLINE MULTIPLAYER</h2><p className="mt-4 max-w-md text-center text-sm text-white/70">Real-time online play needs a dedicated game server (WebSockets + netcode) that Vercel can&apos;t host. It&apos;s <span className="text-yellow-300">coming soon</span> — needs a separate realtime backend (Colyseus/Socket.IO on Railway/Fly.io).</p><PlayButton label="← Back" onClick={() => setPhase("menu")} /></Overlay>)}
-      {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
-      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
-      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-2 text-2xl font-bold">#{place} <span className="text-base font-normal text-white/60">place</span></p><p className="mt-2 text-lg">{hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
+      {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
+      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
+      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-2 text-2xl font-bold">#{place} <span className="text-base font-normal text-white/60">place</span></p><p className="mt-2 text-lg">{hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
 
       {showControls && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowControls(false)}>
@@ -832,6 +885,9 @@ export default function Game() {
   );
 }
 
+function Section({ title, children }: { title: string; children: React.ReactNode }) { return <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><h3 className="mb-2 text-sm font-bold uppercase tracking-widest text-cyan-300/80">{title}</h3>{children}</div>; }
+function Slider({ label, min, max, step, value, onChange, fmt }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; fmt: (v: number) => string }) { return (<div className="py-1.5"><div className="mb-1 flex justify-between text-sm"><span className="text-white/70">{label}</span><span className="font-bold text-cyan-200">{fmt(value)}</span></div><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)} className="w-full accent-cyan-400" /></div>); }
+function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) { return (<button onClick={onClick} className="flex w-full items-center justify-between py-2 text-sm"><span className="text-white/70">{label}</span><span className={`relative h-6 w-11 rounded-full transition ${on ? "bg-cyan-400" : "bg-white/15"}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${on ? "left-[22px]" : "left-0.5"}`} /></span></button>); }
 function Overlay({ children }: { children: React.ReactNode }) { return <div className="fade-in absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70 px-4 backdrop-blur-sm">{children}</div>; }
 function SkinAvatar({ s }: { s: Skin }) {
   const body = `#${s.color.toString(16).padStart(6, "0")}`;
