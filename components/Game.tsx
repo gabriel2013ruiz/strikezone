@@ -12,6 +12,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; };
 
 const ARENA = 110;
 const MAPS = [
@@ -142,6 +143,7 @@ export default function Game() {
   const [showTeams, setShowTeams] = useState(false);
   const [showLocker, setShowLocker] = useState(false);
   const [goalShow, setGoalShow] = useState(false);
+  const [isTouch, setIsTouch] = useState(false);
   const metaRef = useRef<Meta>(defaultMeta());
   const applyMeta = (m: Meta) => { metaRef.current = m; setMeta(m); saveMeta(m); };
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -166,7 +168,7 @@ export default function Game() {
     }, 1700);
   };
 
-  const apiRef = useRef<{ start: (mode: Mode, map: number) => void } | null>(null);
+  const apiRef = useRef<GameApi | null>(null);
   const phaseRef = useRef<Phase>("menu"); phaseRef.current = phase;
 
   useEffect(() => { const m = loadMeta(); metaRef.current = m; setMeta(m); const s = loadSettings(); settingsRef.current = s; setSettings(s); }, []);
@@ -472,7 +474,9 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, camMode: 0, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, invuln: false, lastKickKills: 0, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, camMode: 0, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, invuln: false, lastKickKills: 0, moveX: 0, moveZ: 0, yaw: 0, pitch: 0, touch: false, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0);
+    state.touch = isTouch; setIsTouch(isTouch);
     const keys: Record<string, boolean> = {};
     const raycaster = new THREE.Raycaster(); const losRay = new THREE.Raycaster(); const downRay = new THREE.Raycaster(); const DOWN = new THREE.Vector3(0, -1, 0);
     const curW = () => { const s = state.inv[state.equip]; return s && s.type === "weapon" && s.wId ? WEAPONS[s.wId] : WEAPONS.pistol; };
@@ -561,11 +565,25 @@ export default function Game() {
       // varied spawn near cover
       const sp = spawnSpots.length ? spawnSpots[(Math.random() * spawnSpots.length) | 0] : new THREE.Vector3(0, 0, 0);
       camera.position.set(sp.x + (Math.random() - 0.5) * 2, 1.7, sp.z + 2.5); camera.rotation.set(0, Math.atan2(-sp.x, -sp.z), 0);
+      state.yaw = Math.atan2(-sp.x, -sp.z); state.pitch = 0; state.moveX = 0; state.moveZ = 0;
       if (m === "single") { for (let i = 0; i < 10; i++) makeBot((spawns[i % spawns.length] || pickRoam()).clone(), false); }
       else { for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; makeTarget(new THREE.Vector3(Math.cos(a) * (16 + (i % 3) * 7), 0, Math.sin(a) * (16 + (i % 3) * 7))); } for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.4; makeBot(new THREE.Vector3(Math.cos(a) * 28, 0, Math.sin(a) * 28), true); } }
       state.countEnd = now() + 3000; syncHud(true);
     };
-    apiRef.current = { start: (m, idx) => { if (!state.alive || phaseRef.current === "menu" || phaseRef.current === "dead") reset(m, idx); controls.lock(); } };
+    apiRef.current = {
+      start: (m, idx) => { if (!state.alive || phaseRef.current === "menu" || phaseRef.current === "dead" || phaseRef.current === "win") reset(m, idx); if (state.touch) setPhase("playing"); else controls.lock(); },
+      move: (x, z) => { state.moveX = x; state.moveZ = z; },
+      look: (dx, dy) => { const s = settingsRef.current.sens; state.yaw -= dx * 0.005 * s; state.pitch = Math.max(-1.5, Math.min(1.5, state.pitch - dy * 0.005 * s)); },
+      fire: (v) => { state.mouseDown = v; if (v && !curW().auto) shoot(); },
+      ads: (v) => { state.ads = v; },
+      jump: () => { if (state.canJump) { state.vel.y = 6.4; state.canJump = false; } },
+      reloadW: () => reload(),
+      crouchHold: (v) => { keys[settingsRef.current.binds.crouch] = v; },
+      potion: (id) => usePotion(id),
+      kick: () => tryKick(),
+      cam: () => { state.camMode = (state.camMode + 1) % 3; },
+      pause: () => { state.mouseDown = false; setPhase("paused"); },
+    };
     const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(placement); controls.unlock(); setPhase("dead"); };
     const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
     window.addEventListener("resize", onResize);
@@ -581,7 +599,8 @@ export default function Game() {
       const counting = nowt < state.countEnd;
       const cval = counting ? Math.ceil((state.countEnd - nowt) / 1000) : 0;
       if (cval !== lastCount) { lastCount = cval; setCount(cval); }
-      const playing = controls.isLocked && state.alive;
+      const playing = (state.touch ? phaseRef.current === "playing" : controls.isLocked) && state.alive;
+      if (state.touch) { camera.rotation.set(state.pitch, state.yaw, 0, "YXZ"); } // manual look on mobile
 
       if (playing) {
         // crouch + vertical
@@ -597,7 +616,7 @@ export default function Game() {
           const B = settingsRef.current.binds;
           const sprint = keys[B.sprint] ? 1.7 : 1; const spd = nowt < state.speedUntil ? 1.5 : 1; const accel = 58 * sprint * spd * (1 - 0.45 * state.crouchAmt), damp = 9;
           state.vel.x -= state.vel.x * damp * dt; state.vel.z -= state.vel.z * damp * dt;
-          const fwd = (keys[B.forward] ? 1 : 0) - (keys[B.back] ? 1 : 0); const side = (keys[B.right] ? 1 : 0) - (keys[B.left] ? 1 : 0);
+          const fwd = (keys[B.forward] ? 1 : 0) - (keys[B.back] ? 1 : 0) + state.moveZ; const side = (keys[B.right] ? 1 : 0) - (keys[B.left] ? 1 : 0) + state.moveX;
           if (fwd) state.vel.z -= fwd * accel * dt; if (side) state.vel.x += side * accel * dt;
           controls.moveRight(state.vel.x * dt); controls.moveForward(-state.vel.z * dt); collide(camera.position, 0.5);
         }
@@ -675,7 +694,7 @@ export default function Game() {
 
       // camera modes: 0 first-person · 1 third-person behind · 2 front view (see your skin)
       let savedCam: THREE.Vector3 | null = null; let savedQuat: THREE.Quaternion | null = null;
-      if (state.camMode > 0 && controls.isLocked && state.alive) {
+      if (state.camMode > 0 && playing) {
         savedCam = camera.position.clone(); savedQuat = camera.quaternion.clone();
         const dir = camera.getWorldDirection(new THREE.Vector3());
         const eyeH2 = 1.7 - state.crouchAmt * 0.75;
@@ -702,8 +721,8 @@ export default function Game() {
   const rarOf = (s: Slot): Rarity => s.type === "weapon" ? WEAPONS[s.wId!].rarity : s.type === "heal" ? HEALS[s.hId!].rarity : "common";
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={mountRef} className="absolute inset-0" />
+    <div className="relative h-full w-full" style={{ touchAction: "none" }}>
+      <div ref={mountRef} className="absolute inset-0" style={{ touchAction: "none" }} />
       <div key={dmgFlash} className="pointer-events-none absolute inset-0" style={{ boxShadow: "inset 0 0 160px 50px rgba(220,40,40,0.55)", opacity: 0, animation: dmgFlash ? "fadeIn 0.1s ease forwards reverse" : undefined }} />
       {phase === "playing" && aiming && <div className="pointer-events-none absolute inset-0" style={{ boxShadow: "inset 0 0 220px 120px rgba(0,0,0,0.85)" }} />}
 
@@ -713,6 +732,7 @@ export default function Game() {
           {count > 0 && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="text-8xl font-black text-cyan-300 hud-shadow" style={{ textShadow: "0 0 30px rgba(0,200,255,0.7)" }}>{count}</div></div>}
           {/* soccer goal celebration */}
           {goalShow && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><div className="reward-pop text-center"><div className="text-8xl">⚽🎉</div><div className="text-7xl font-black text-yellow-300" style={{ textShadow: "0 0 40px rgba(255,200,40,0.9)" }}>GOOOOAL!</div><div className="mt-2 text-3xl font-bold text-white">+100 🪙</div><div className="mt-1 text-sm text-white/60">🛡️ invincible…</div></div></div>}
+          {isTouch && <TouchControls apiRef={apiRef} potions={potionHud} />}
 
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: settings.crosshair }}>
             {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
@@ -783,7 +803,7 @@ export default function Game() {
             <p className="mt-5 text-[11px] uppercase tracking-[0.3em] text-white/40">Map</p>
             <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-40 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
             <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-7 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-14 py-3.5 text-2xl font-black tracking-wider text-black transition hover:scale-105 hover:brightness-110" style={{ boxShadow: "0 0 40px -8px rgba(0,200,255,0.8)" }}>▶ PLAY</button>
-            <p className="mt-2 text-[11px] text-white/40">Click Play, then move your mouse to look around</p>
+            <p className="mt-2 text-[11px] text-white/40">{isTouch ? "Tap PLAY · left joystick to move · drag right side to look · 🔫 to shoot" : "Click Play, then move your mouse to look around"}</p>
           </div>
         </Overlay>
       )}
@@ -967,6 +987,41 @@ export default function Game() {
   );
 }
 
+function TouchControls({ apiRef, potions }: { apiRef: React.MutableRefObject<GameApi | null>; potions: { health: number; shield: number; speed: number } }) {
+  const api = () => apiRef.current;
+  const joyId = useRef<number | null>(null); const joyBase = useRef<{ x: number; y: number } | null>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const lookId = useRef<number | null>(null); const lookLast = useRef({ x: 0, y: 0 });
+  const R = 55;
+  const leftDown = (e: React.PointerEvent) => { joyId.current = e.pointerId; joyBase.current = { x: e.clientX, y: e.clientY }; (e.target as Element).setPointerCapture?.(e.pointerId); };
+  const leftMove = (e: React.PointerEvent) => { if (joyId.current !== e.pointerId || !joyBase.current) return; let dx = e.clientX - joyBase.current.x, dy = e.clientY - joyBase.current.y; const d = Math.hypot(dx, dy) || 1; const cd = Math.min(d, R); dx = (dx / d) * cd; dy = (dy / d) * cd; setKnob({ x: dx, y: dy }); api()?.move(dx / R, -dy / R); };
+  const leftUp = (e: React.PointerEvent) => { if (joyId.current !== e.pointerId) return; joyId.current = null; joyBase.current = null; setKnob({ x: 0, y: 0 }); api()?.move(0, 0); };
+  const rightDown = (e: React.PointerEvent) => { lookId.current = e.pointerId; lookLast.current = { x: e.clientX, y: e.clientY }; (e.target as Element).setPointerCapture?.(e.pointerId); };
+  const rightMove = (e: React.PointerEvent) => { if (lookId.current !== e.pointerId) return; api()?.look(e.clientX - lookLast.current.x, e.clientY - lookLast.current.y); lookLast.current = { x: e.clientX, y: e.clientY }; };
+  const rightUp = (e: React.PointerEvent) => { if (lookId.current !== e.pointerId) return; lookId.current = null; };
+  const b = "flex items-center justify-center rounded-full bg-white/15 backdrop-blur border border-white/30 font-bold text-white active:bg-white/35 select-none";
+  const stop = (e: React.PointerEvent) => e.stopPropagation();
+  return (
+    <div className="absolute inset-0 z-30" style={{ touchAction: "none" }}>
+      <div className="absolute left-0 top-0 h-full w-1/2" onPointerDown={leftDown} onPointerMove={leftMove} onPointerUp={leftUp} onPointerCancel={leftUp} />
+      <div className="absolute right-0 top-0 h-full w-1/2" onPointerDown={rightDown} onPointerMove={rightMove} onPointerUp={rightUp} onPointerCancel={rightUp} />
+      <div className="pointer-events-none absolute bottom-24 left-24 h-32 w-32 -translate-x-1/2 rounded-full border-2 border-white/20 bg-white/5"><div className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-white/30" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} /></div>
+      <button className={`${b} absolute bottom-16 right-6 h-20 w-20 text-3xl`} onPointerDown={(e) => { stop(e); api()?.fire(true); }} onPointerUp={(e) => { stop(e); api()?.fire(false); }} onPointerCancel={() => api()?.fire(false)}>🔫</button>
+      <button className={`${b} absolute bottom-40 right-8 h-16 w-16 text-2xl`} onPointerDown={(e) => { stop(e); api()?.ads(true); }} onPointerUp={(e) => { stop(e); api()?.ads(false); }} onPointerCancel={() => api()?.ads(false)}>🎯</button>
+      <button className={`${b} absolute bottom-16 right-32 h-16 w-16 text-2xl`} onPointerDown={(e) => { stop(e); api()?.jump(); }}>⤴️</button>
+      <button className={`${b} absolute bottom-36 right-32 h-12 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.reloadW(); }}>🔄</button>
+      <button className={`${b} absolute bottom-52 right-32 h-12 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.crouchHold(true); }} onPointerUp={() => api()?.crouchHold(false)} onPointerCancel={() => api()?.crouchHold(false)}>🡇</button>
+      <button className={`${b} absolute right-4 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.pause(); }}>⏸️</button>
+      <button className={`${b} absolute right-16 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.cam(); }}>👁️</button>
+      <button className={`${b} absolute right-28 top-4 h-11 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.kick(); }}>⚽</button>
+      <div className="absolute bottom-3 left-3 flex gap-2">
+        <button className={`${b} h-11 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.potion("health"); }}>❤️{potions.health}</button>
+        <button className={`${b} h-11 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.potion("shield"); }}>🛡️{potions.shield}</button>
+        <button className={`${b} h-11 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.potion("speed"); }}>⚡{potions.speed}</button>
+      </div>
+    </div>
+  );
+}
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><h3 className="mb-2 text-sm font-bold uppercase tracking-widest text-cyan-300/80">{title}</h3>{children}</div>; }
 function Slider({ label, min, max, step, value, onChange, fmt }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; fmt: (v: number) => string }) { return (<div className="py-1.5"><div className="mb-1 flex justify-between text-sm"><span className="text-white/70">{label}</span><span className="font-bold text-cyan-200">{fmt(value)}</span></div><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)} className="w-full accent-cyan-400" /></div>); }
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) { return (<button onClick={onClick} className="flex w-full items-center justify-between py-2 text-sm"><span className="text-white/70">{label}</span><span className={`relative h-6 w-11 rounded-full transition ${on ? "bg-cyan-400" : "bg-white/15"}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${on ? "left-[22px]" : "left-0.5"}`} /></span></button>); }

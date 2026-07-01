@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -10,6 +10,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "STRIKEZONE — 3D Browser FPS",
   description: "A fast browser-based first-person shooter. Survive the waves. Built with Three.js.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#05060a",
 };
 
 export default function RootLayout({
