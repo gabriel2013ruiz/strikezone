@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win";
 type Mode = "single" | "training";
@@ -53,6 +57,7 @@ function tex(draw: (c: CanvasRenderingContext2D, s: number) => void, size = 256,
 
 export default function Game() {
   const mountRef = useRef<HTMLDivElement>(null);
+  const miniRef = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<Phase>("menu");
   const [mode, setMode] = useState<Mode>("single");
   const [mapIdx, setMapIdx] = useState(0);
@@ -61,7 +66,7 @@ export default function Game() {
   const [equip, setEquip] = useState(0);
   const [hit, setHit] = useState(0); const [dmgFlash, setDmgFlash] = useState(0);
   const [aiming, setAiming] = useState(false); const [hidden, setHidden] = useState(false);
-  const [prompt, setPrompt] = useState(""); const [toast, setToast] = useState(""); const [count, setCount] = useState(0);
+  const [prompt, setPrompt] = useState(""); const [toast, setToast] = useState(""); const [count, setCount] = useState(0); const [crouched, setCrouched] = useState(false);
 
   const apiRef = useRef<{ start: (mode: Mode, map: number) => void } | null>(null);
   const phaseRef = useRef<Phase>("menu"); phaseRef.current = phase;
@@ -83,6 +88,12 @@ export default function Game() {
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environmentIntensity = 0.35;
+    // post-processing: subtle bloom for glow (muzzle, chests, loot)
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.5, 0.9);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
 
     const worldGrp = new THREE.Group(); scene.add(worldGrp);
     const solids: THREE.Object3D[] = []; const floors: THREE.Object3D[] = [];
@@ -300,14 +311,14 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
     const keys: Record<string, boolean> = {};
     const raycaster = new THREE.Raycaster(); const losRay = new THREE.Raycaster(); const downRay = new THREE.Raycaster(); const DOWN = new THREE.Vector3(0, -1, 0);
     const curW = () => { const s = state.inv[state.equip]; return s && s.type === "weapon" && s.wId ? WEAPONS[s.wId] : WEAPONS.pistol; };
     let lastHudSync = 0;
     const syncHud = (force = false) => { const now = performance.now(); if (!force && now - lastHudSync < 80) return; lastHudSync = now; const s = state.inv[state.equip]; const w = curW(); setHud({ hp: Math.max(0, Math.round(state.hp)), ammo: s?.ammo ?? 0, mag: w.mag, reserve: s?.reserve ?? 0, score: state.score, kills: state.kills, shots: state.shots, hits: state.hits, reloading: state.reloading, mode: state.mode, alive: bots.filter((b) => !b.dummy && !b.dying).length, wname: w.name }); };
     const syncInv = () => { setInv(state.inv.map((s) => ({ ...s }))); setEquip(state.equip); };
-    let lastAds = false, lastHidden = false, lastPrompt = "", toastT = 0, lastCount = 0;
+    let lastAds = false, lastHidden = false, lastPrompt = "", toastT = 0, lastCount = 0, lastCrouch = false;
 
     const tracers: { line: THREE.Line; life: number }[] = [];
     const addTracer = (from: THREE.Vector3, to: THREE.Vector3, color = 0xfff2a0) => { const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })); worldGrp.add(line); tracers.push({ line, life: 0.06 }); };
@@ -383,7 +394,7 @@ export default function Game() {
     };
     apiRef.current = { start: (m, idx) => { if (!state.alive || phaseRef.current === "menu" || phaseRef.current === "dead") reset(m, idx); controls.lock(); } };
     const die = () => { state.alive = false; controls.unlock(); setPhase("dead"); };
-    const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); };
+    const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
     window.addEventListener("resize", onResize);
 
     const clock = new THREE.Clock(); const tmp = new THREE.Vector3(); const eye = new THREE.Vector3(); const rayOrig = new THREE.Vector3(); let raf = 0;
@@ -400,13 +411,15 @@ export default function Game() {
       const playing = controls.isLocked && state.alive;
 
       if (playing) {
-        // vertical: floor under player
+        // crouch + vertical
+        state.crouchAmt += ((keys["KeyC"] || keys["ControlLeft"] ? 1 : 0) - state.crouchAmt) * Math.min(1, dt * 10);
+        const eyeH = 1.7 - state.crouchAmt * 0.75;
         rayOrig.set(camera.position.x, camera.position.y + 0.3, camera.position.z); downRay.set(rayOrig, DOWN); downRay.far = 80;
         const fh = downRay.intersectObjects(floors, false); let groundY = 0; if (fh.length) groundY = fh[0].point.y;
-        const feetEye = groundY + 1.7;
+        const feetEye = groundY + eyeH;
 
         if (!counting) {
-          const sprint = keys["ShiftLeft"] ? 1.7 : 1; const accel = 58 * sprint, damp = 9;
+          const sprint = keys["ShiftLeft"] ? 1.7 : 1; const accel = 58 * sprint * (1 - 0.45 * state.crouchAmt), damp = 9;
           state.vel.x -= state.vel.x * damp * dt; state.vel.z -= state.vel.z * damp * dt;
           const fwd = (keys["KeyW"] ? 1 : 0) - (keys["KeyS"] ? 1 : 0); const side = (keys["KeyD"] ? 1 : 0) - (keys["KeyA"] ? 1 : 0);
           if (fwd) state.vel.z -= fwd * accel * dt; if (side) state.vel.x += side * accel * dt;
@@ -433,7 +446,7 @@ export default function Game() {
 
         if (!counting) {
           eye.copy(camera.position);
-          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
+          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)) * (1 - 0.4 * state.crouchAmt); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
           if (state.mode === "training") for (const b of bots) { if (!b.dummy) continue;
             if (b.dead) { if (now() > (b.respawnAt || 0)) { b.dead = false; b.hp = 100; b.group.visible = true; b.group.rotation.set(0, 0, 0); if (b.home) b.group.position.copy(b.home); botParts.push(b.body, b.head); } continue; }
             if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 7); if (now() > (b.dieAt || 0)) { b.dying = false; b.dead = true; b.group.visible = false; b.respawnAt = now() + 3000; } continue; }
@@ -444,14 +457,35 @@ export default function Game() {
 
         if (state.ads !== lastAds) { lastAds = state.ads; setAiming(state.ads); }
         if (playerHidden !== lastHidden) { lastHidden = playerHidden; setHidden(playerHidden); }
+        const cr = state.crouchAmt > 0.5; if (cr !== lastCrouch) { lastCrouch = cr; setCrouched(cr); }
         syncHud();
       }
       for (let i = tracers.length - 1; i >= 0; i--) { tracers[i].life -= dt; const m = tracers[i].line.material as THREE.LineBasicMaterial; m.opacity = Math.max(0, tracers[i].life / 0.06) * 0.9; if (tracers[i].life <= 0) { worldGrp.remove(tracers[i].line); tracers[i].line.geometry.dispose(); (tracers[i].line.material as THREE.Material).dispose(); tracers.splice(i, 1); } }
-      renderer.render(scene, camera);
+
+      // minimap radar
+      const mini = miniRef.current;
+      if (mini) { const mc = mini.getContext("2d"); if (mc) {
+        const S = mini.width, R = 68, sc = S / (2 * R), px = camera.position.x, pz = camera.position.z;
+        const w2m = (wx: number, wz: number): [number, number] => [S / 2 + (wx - px) * sc, S / 2 + (wz - pz) * sc];
+        mc.clearRect(0, 0, S, S); mc.save(); mc.beginPath(); mc.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2); mc.clip();
+        mc.fillStyle = "rgba(8,12,18,0.72)"; mc.fillRect(0, 0, S, S);
+        mc.fillStyle = "rgba(120,132,152,0.45)"; for (const c of colliders) { if (c.minx > 9000) continue; const [x1, y1] = w2m(c.minx, c.minz); const [x2, y2] = w2m(c.maxx, c.maxz); mc.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1) || 1, Math.abs(y2 - y1) || 1); }
+        mc.fillStyle = "rgba(56,168,84,0.4)"; for (const bz of bushZones) { const [x, y] = w2m(bz.x, bz.z); mc.beginPath(); mc.arc(x, y, bz.r * sc, 0, Math.PI * 2); mc.fill(); }
+        for (const c of chests) { if (c.opened) continue; const [x, y] = w2m(c.pos.x, c.pos.z); mc.fillStyle = "#ffd24a"; mc.fillRect(x - 2, y - 2, 4, 4); }
+        for (const p of pickups) { if (!p.active) continue; const [x, y] = w2m(p.pos.x, p.pos.z); mc.fillStyle = "#22c55e"; mc.fillRect(x - 1.5, y - 1.5, 3, 3); }
+        for (const gd of grounds) { const [x, y] = w2m(gd.pos.x, gd.pos.z); mc.fillStyle = "#ffffff"; mc.fillRect(x - 1.5, y - 1.5, 3, 3); }
+        mc.fillStyle = "#ff4444"; for (const b of bots) { if (b.dummy || b.dying || b.dead) continue; const [x, y] = w2m(b.group.position.x, b.group.position.z); mc.beginPath(); mc.arc(x, y, 2.6, 0, Math.PI * 2); mc.fill(); }
+        mc.restore();
+        const d = camera.getWorldDirection(new THREE.Vector3());
+        mc.strokeStyle = "#00e5ff"; mc.lineWidth = 2; mc.beginPath(); mc.moveTo(S / 2, S / 2); mc.lineTo(S / 2 + d.x * 13, S / 2 + d.z * 13); mc.stroke();
+        mc.fillStyle = "#00e5ff"; mc.beginPath(); mc.arc(S / 2, S / 2, 3, 0, Math.PI * 2); mc.fill();
+        mc.strokeStyle = "rgba(255,255,255,0.22)"; mc.lineWidth = 2; mc.beginPath(); mc.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); mc.stroke();
+      } }
+      composer.render();
     };
     animate();
 
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("keyup", onKeyUp); document.removeEventListener("mousedown", onMouseDown); document.removeEventListener("mouseup", onMouseUp); document.removeEventListener("wheel", onWheel); document.removeEventListener("contextmenu", onContext); controls.dispose(); renderer.dispose(); pmrem.dispose(); if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); if (actx) actx.close().catch(() => {}); };
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); document.removeEventListener("keydown", onKeyDown); document.removeEventListener("keyup", onKeyUp); document.removeEventListener("mousedown", onMouseDown); document.removeEventListener("mouseup", onMouseUp); document.removeEventListener("wheel", onWheel); document.removeEventListener("contextmenu", onContext); controls.dispose(); renderer.dispose(); pmrem.dispose(); composer.dispose(); if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); if (actx) actx.close().catch(() => {}); };
   }, []);
 
   const lowHp = hud.hp <= 30; const acc = hud.shots ? Math.round((hud.hits / hud.shots) * 100) : 0;
@@ -478,7 +512,13 @@ export default function Game() {
             <div className="rounded-lg bg-black/40 px-3 py-1.5">SCORE <span className="font-bold text-yellow-300">{hud.score}</span> <span className="opacity-50">· {hud.kills} kills</span></div>
           </div>
 
-          {hidden && <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300 hud-shadow">🌿 HIDDEN</div>}
+          {/* minimap */}
+          <canvas ref={miniRef} width={172} height={172} className="pointer-events-none absolute right-4 top-14 h-[172px] w-[172px] rounded-full" />
+          {/* status badges */}
+          <div className="pointer-events-none absolute left-1/2 top-16 flex -translate-x-1/2 gap-2">
+            {hidden && <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300 hud-shadow">🌿 HIDDEN</div>}
+            {crouched && <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-cyan-200 hud-shadow">🡇 CROUCH</div>}
+          </div>
           {prompt && <div className="pointer-events-none absolute left-1/2 top-1/2 mt-10 -translate-x-1/2 rounded bg-black/50 px-3 py-1 text-xs font-bold hud-shadow">Press <span className="text-cyan-300">E</span> to {prompt}</div>}
           {toast && <div className="pointer-events-none absolute left-1/2 top-28 -translate-x-1/2 rounded-full bg-cyan-500/25 px-4 py-1.5 text-sm font-bold text-cyan-100 hud-shadow">{toast}</div>}
 
@@ -519,4 +559,4 @@ function Overlay({ children }: { children: React.ReactNode }) { return <div clas
 function Title() { return <h1 className="text-center text-5xl font-black tracking-[0.2em] sm:text-7xl"><span className="text-cyan-300">STRIKE</span><span className="text-red-500">ZONE</span></h1>; }
 function ModeCard({ active, onClick, icon, title, desc, soon }: { active: boolean; onClick: () => void; icon: string; title: string; desc: string; soon?: boolean }) { return (<button onClick={onClick} className={`relative w-44 rounded-xl border p-4 text-left transition ${active ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}>{soon && <span className="absolute right-2 top-2 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300">SOON</span>}<div className="text-3xl">{icon}</div><div className="mt-2 font-bold">{title}</div><div className="text-[11px] text-white/55">{desc}</div></button>); }
 function PlayButton({ label, onClick }: { label: string; onClick: () => void }) { return <button onClick={onClick} className="mt-7 rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-3.5 text-lg font-bold text-black transition hover:scale-105 hover:brightness-110">{label}</button>; }
-function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["1-7", "Inventory"], ["Scroll", "Swap gun"], ["E", "Chest/Door"], ["R", "Reload"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
+function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["C / Ctrl", "Crouch"], ["1-7", "Inventory"], ["Scroll", "Swap gun"], ["E", "Chest/Door"], ["R", "Reload"], ["Space", "Jump"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
