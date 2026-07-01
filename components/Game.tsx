@@ -219,17 +219,18 @@ export default function Game() {
       const rug = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(w, d) * 0.5, Math.min(w, d) * 0.4), new THREE.MeshStandardMaterial({ color: rugCol, roughness: 1 })); rug.rotation.x = -Math.PI / 2; rug.position.set(cx, 0.12, cz); worldGrp.add(rug);
       place(new THREE.BoxGeometry(1.2, 0.1, 0.7), wood(), cx, 0.9, cz - d / 4); place(new THREE.BoxGeometry(0.1, 0.8, 0.1), wood(), cx - 0.5, 0.45, cz - d / 4); place(new THREE.BoxGeometry(0.1, 0.8, 0.1), wood(), cx + 0.5, 0.45, cz - d / 4);
       for (const ox of [-0.55, 0.55]) place(new THREE.BoxGeometry(0.4, 0.5, 0.4), wood(), cx + ox, 0.25, cz - d / 4 + 0.7);
-      place(new THREE.BoxGeometry(w * 0.5, 1.5, 0.3), new THREE.MeshStandardMaterial({ color: 0x5a3f24, roughness: 0.9 }), cx, 0.78, cz - d / 2 + 0.35, true);
-      for (let i = 0; i < 2; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), new THREE.MeshStandardMaterial({ color: 0x3a4a3a, metalness: 0.4, roughness: 0.5 })); bar.position.set(cx + (i ? 1 : -1) * w * 0.3, 0.45, cz + d * 0.3); bar.castShadow = true; addSolid(bar, true); }
+      place(new THREE.BoxGeometry(w * 0.5, 1.5, 0.3), new THREE.MeshStandardMaterial({ color: 0x5a3f24, roughness: 0.9 }), cx, 0.78, cz - d / 2 + 0.35, false);
+      for (let i = 0; i < 2; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), new THREE.MeshStandardMaterial({ color: 0x3a4a3a, metalness: 0.4, roughness: 0.5 })); bar.position.set(cx + (i ? 1 : -1) * w * 0.3, 0.45, cz + d * 0.3); bar.castShadow = true; worldGrp.add(bar); solids.push(bar); }
     };
     const doorWall = (cx: number, cz: number, w: number, d: number, base: string, H: number) => {
       const T = 0.3, doorW = 2.0, doorH = 2.5;
       const wmat = () => new THREE.MeshStandardMaterial({ map: winTex(base), roughness: 0.9 });
-      const wall = (x: number, y: number, z: number, sx: number, sy: number, sz: number, col = true) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wmat()); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; worldGrp.add(m); solids.push(m); if (col) { const b = new THREE.Box3().setFromObject(m); pushCol(b.min.x, b.min.z, b.max.x, b.max.z); } };
+      // walls do NOT collide with movement (no invisible barrier) — they still block bullets (in solids) and look solid
+      const wall = (x: number, y: number, z: number, sx: number, sy: number, sz: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wmat()); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; worldGrp.add(m); solids.push(m); };
       wall(cx, H / 2, cz - d / 2, w, H, T); wall(cx - w / 2, H / 2, cz, T, H, d); wall(cx + w / 2, H / 2, cz, T, H, d);
       const segW = (w - doorW) / 2;
       wall(cx - (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T); wall(cx + (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T);
-      wall(cx, doorH + (H - doorH) / 2, cz + d / 2, doorW, H - doorH, T, false);
+      wall(cx, doorH + (H - doorH) / 2, cz + d / 2, doorW, H - doorH, T);
       // door hangs permanently OPEN (no collider) — doorways are always-clear passages, no barrier
       const pivot = new THREE.Group(); pivot.position.set(cx - doorW / 2, 0, cz + d / 2); pivot.rotation.y = -1.4; worldGrp.add(pivot);
       const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.08), new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 })); door.position.set(doorW / 2, doorH / 2, 0); door.castShadow = true; pivot.add(door);
