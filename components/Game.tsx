@@ -52,16 +52,22 @@ const GUNSPEC: Record<string, GunSpec> = {
 type Acc = "none" | "horns" | "crown" | "visor" | "hood";
 interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; accent?: number; metal?: number; emissive?: number; acc?: Acc; icon: string; limited?: boolean; }
 const TEAMS: { id: string; name: string; flag: string; color: number }[] = [
-  { id: "bra", name: "Brazil", flag: "🇧🇷", color: 0x009c3b }, { id: "arg", name: "Argentina", flag: "🇦🇷", color: 0x6cace4 },
-  { id: "fra", name: "France", flag: "🇫🇷", color: 0x0055a4 }, { id: "eng", name: "England", flag: "🏴", color: 0xffffff },
-  { id: "esp", name: "Spain", flag: "🇪🇸", color: 0xc60b1e }, { id: "ger", name: "Germany", flag: "🇩🇪", color: 0x111111 },
-  { id: "por", name: "Portugal", flag: "🇵🇹", color: 0x006600 }, { id: "ned", name: "Netherlands", flag: "🇳🇱", color: 0xff6a00 },
-  { id: "ita", name: "Italy", flag: "🇮🇹", color: 0x0066b3 }, { id: "usa", name: "USA", flag: "🇺🇸", color: 0x1a3a6b },
-  { id: "mex", name: "Mexico", flag: "🇲🇽", color: 0x006847 }, { id: "uru", name: "Uruguay", flag: "🇺🇾", color: 0x5cbcf0 },
-  { id: "bel", name: "Belgium", flag: "🇧🇪", color: 0xe30613 }, { id: "cro", name: "Croatia", flag: "🇭🇷", color: 0xd81e2c },
-  { id: "jpn", name: "Japan", flag: "🇯🇵", color: 0xbc002d }, { id: "kor", name: "South Korea", flag: "🇰🇷", color: 0xcd2e3a },
-  { id: "mar", name: "Morocco", flag: "🇲🇦", color: 0xc1272d }, { id: "sen", name: "Senegal", flag: "🇸🇳", color: 0x00853f },
-  { id: "col", name: "Colombia", flag: "🇨🇴", color: 0xfcd116 }, { id: "sui", name: "Switzerland", flag: "🇨🇭", color: 0xd52b1e },
+  { id: "usa", name: "USA", flag: "🇺🇸", color: 0x1a3a6b }, { id: "can", name: "Canada", flag: "🇨🇦", color: 0xd52b1e }, { id: "mex", name: "Mexico", flag: "🇲🇽", color: 0x006847 },
+  { id: "bra", name: "Brazil", flag: "🇧🇷", color: 0x009c3b }, { id: "arg", name: "Argentina", flag: "🇦🇷", color: 0x6cace4 }, { id: "uru", name: "Uruguay", flag: "🇺🇾", color: 0x5cbcf0 },
+  { id: "col", name: "Colombia", flag: "🇨🇴", color: 0xfcd116 }, { id: "ecu", name: "Ecuador", flag: "🇪🇨", color: 0xffd100 }, { id: "par", name: "Paraguay", flag: "🇵🇾", color: 0xda291c },
+  { id: "fra", name: "France", flag: "🇫🇷", color: 0x0055a4 }, { id: "eng", name: "England", flag: "🏴", color: 0xffffff }, { id: "esp", name: "Spain", flag: "🇪🇸", color: 0xc60b1e },
+  { id: "ger", name: "Germany", flag: "🇩🇪", color: 0x222222 }, { id: "por", name: "Portugal", flag: "🇵🇹", color: 0x006600 }, { id: "ned", name: "Netherlands", flag: "🇳🇱", color: 0xff6a00 },
+  { id: "ita", name: "Italy", flag: "🇮🇹", color: 0x0066b3 }, { id: "bel", name: "Belgium", flag: "🇧🇪", color: 0xe30613 }, { id: "cro", name: "Croatia", flag: "🇭🇷", color: 0xd81e2c },
+  { id: "sui", name: "Switzerland", flag: "🇨🇭", color: 0xd52b1e }, { id: "den", name: "Denmark", flag: "🇩🇰", color: 0xc60c30 }, { id: "pol", name: "Poland", flag: "🇵🇱", color: 0xdc143c },
+  { id: "aut", name: "Austria", flag: "🇦🇹", color: 0xed2939 }, { id: "ukr", name: "Ukraine", flag: "🇺🇦", color: 0x005bbb }, { id: "srb", name: "Serbia", flag: "🇷🇸", color: 0xc6363c },
+  { id: "tur", name: "Türkiye", flag: "🇹🇷", color: 0xe30a17 }, { id: "nor", name: "Norway", flag: "🇳🇴", color: 0xef2b2d }, { id: "swe", name: "Sweden", flag: "🇸🇪", color: 0xfecc00 },
+  { id: "mar", name: "Morocco", flag: "🇲🇦", color: 0xc1272d }, { id: "sen", name: "Senegal", flag: "🇸🇳", color: 0x00853f }, { id: "nga", name: "Nigeria", flag: "🇳🇬", color: 0x008751 },
+  { id: "egy", name: "Egypt", flag: "🇪🇬", color: 0xce1126 }, { id: "gha", name: "Ghana", flag: "🇬🇭", color: 0x006b3f }, { id: "cmr", name: "Cameroon", flag: "🇨🇲", color: 0x007a5e },
+  { id: "alg", name: "Algeria", flag: "🇩🇿", color: 0x006233 }, { id: "civ", name: "Ivory Coast", flag: "🇨🇮", color: 0xf77f00 }, { id: "tun", name: "Tunisia", flag: "🇹🇳", color: 0xe70013 },
+  { id: "jpn", name: "Japan", flag: "🇯🇵", color: 0xbc002d }, { id: "kor", name: "South Korea", flag: "🇰🇷", color: 0xcd2e3a }, { id: "irn", name: "Iran", flag: "🇮🇷", color: 0x239f40 },
+  { id: "ksa", name: "Saudi Arabia", flag: "🇸🇦", color: 0x006c35 }, { id: "aus", name: "Australia", flag: "🇦🇺", color: 0x00843d }, { id: "qat", name: "Qatar", flag: "🇶🇦", color: 0x8a1538 },
+  { id: "irq", name: "Iraq", flag: "🇮🇶", color: 0xce1126 }, { id: "uzb", name: "Uzbekistan", flag: "🇺🇿", color: 0x1eb53a }, { id: "crc", name: "Costa Rica", flag: "🇨🇷", color: 0x002b7f },
+  { id: "jam", name: "Jamaica", flag: "🇯🇲", color: 0x009b3a }, { id: "pan", name: "Panama", flag: "🇵🇦", color: 0xda121a }, { id: "nzl", name: "New Zealand", flag: "🇳🇿", color: 0x1a1a1a },
 ];
 const SKINS: Record<string, Skin> = {
   ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common", accent: 0x2f3a2a, acc: "none", icon: "🪖" },
@@ -329,7 +335,8 @@ export default function Game() {
       const clearOf = (x: number, z: number) => Math.hypot(x, z) > 9;
       const BUILDINGS_ON = true; // buildings back on (walls no longer collide → no barrier)
       const house = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeHouse(a, b, c, dd, e); };
-      const tower = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeTower(a, b, c, dd, e); };
+      const USE_TOWERS = false; // towers replaced by decorated houses
+      const tower = (a: number, b: number, c: number, dd: number, e: string) => { if (!BUILDINGS_ON) return; if (USE_TOWERS) makeTower(a, b, c, dd, e); else makeHouse(a, b, c, dd, e); };
 
       const ground = new THREE.Mesh(new THREE.PlaneGeometry(ARENA * 2, ARENA * 2), new THREE.MeshStandardMaterial({ map: groundTex(P.g[0], P.g[1]), roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; addFloor(ground);
       const bh = 8; for (const [x, z, w, d] of [[0, -ARENA, ARENA * 2, 2], [0, ARENA, ARENA * 2, 2], [-ARENA, 0, 2, ARENA * 2], [ARENA, 0, 2, ARENA * 2]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, bh, d), new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 1 })); m.position.set(x, bh / 2, z); addSolid(m, true); }
@@ -418,7 +425,15 @@ export default function Game() {
       else if (acc === "visor") { const v = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.09, 0.05), new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 2 })); v.position.set(0, 2.08, 0.21); pmAccessory.add(v); }
       else if (acc === "hood") { const h = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.5), new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 })); h.position.y = 2.14; h.castShadow = true; pmAccessory.add(h); }
     };
-    const applyPlayerSkin = (id: string) => { const s = SKINS[id] || SKINS.ranger; pmVest.color.setHex(s.color); pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0; pmHelm.color.setHex(s.accent ?? s.color); buildAccessory(s.acc ?? "none", s.accent ?? 0xffffff); };
+    const applyPlayerSkin = (id: string) => {
+      const s = SKINS[id] || SKINS.ranger;
+      // if a World Cup team is chosen, the jersey (body) takes the team's colors
+      const team = metaRef.current.team ? TEAMS.find((t) => t.id === metaRef.current.team) : null;
+      pmVest.color.setHex(team ? team.color : s.color);
+      pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0;
+      pmHelm.color.setHex(team ? team.color : (s.accent ?? s.color));
+      buildAccessory(s.acc ?? "none", team ? team.color : (s.accent ?? 0xffffff));
+    };
 
     /* ---------- bots ---------- */
     interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; dead?: boolean; home?: THREE.Vector3; respawnAt?: number; }
@@ -974,4 +989,4 @@ function SkinAvatar({ s }: { s: Skin }) {
 function Title() { return <h1 className="text-center text-6xl font-black tracking-[0.2em] sm:text-8xl" style={{ textShadow: "0 0 40px rgba(0,200,255,0.4)" }}><span className="text-cyan-300">STRIKE</span><span className="text-red-500">ZONE</span></h1>; }
 function ModeCard({ active, onClick, icon, title, desc, soon }: { active: boolean; onClick: () => void; icon: string; title: string; desc: string; soon?: boolean }) { return (<button onClick={onClick} className={`relative w-44 rounded-xl border p-4 text-left transition ${active ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}>{soon && <span className="absolute right-2 top-2 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300">SOON</span>}<div className="text-3xl">{icon}</div><div className="mt-2 font-bold">{title}</div><div className="text-[11px] text-white/55">{desc}</div></button>); }
 function PlayButton({ label, onClick }: { label: string; onClick: () => void }) { return <button onClick={onClick} className="mt-7 rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-3.5 text-lg font-bold text-black transition hover:scale-105 hover:brightness-110">{label}</button>; }
-function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["C / Ctrl", "Crouch"], ["Space", "Jump"], ["Shift", "Sprint"], ["1-7", "Weapons/items"], ["8 / 9 / 0", "Potions"], ["Scroll", "Swap gun"], ["E", "Open chest"], ["R", "Reload"], ["TAB", "1st/3rd view"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
+function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim (ADS)"], ["Shift", "Sprint"], ["Space", "Jump"], ["C / Ctrl", "Crouch"], ["1 – 7", "Weapons / items"], ["Scroll", "Swap weapon"], ["8", "❤️ Health potion"], ["9", "🛡️ Shield potion"], ["0", "⚡ Speed potion"], ["E", "Open chest"], ["R", "Reload"], ["F", "⚽ Kick ball"], ["TAB", "Camera (1st/3rd/front)"], ["Esc", "Pause"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
