@@ -49,14 +49,15 @@ const GUNSPEC: Record<string, GunSpec> = {
   goldak: { body: 0.72, barrel: 0.42, barrelR: 0.04, mag: 0.34, stock: true, scope: false, color: 0xb8860b },
 };
 // ---- meta / shop data ----
-interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; }
+type Acc = "none" | "horns" | "crown" | "visor" | "hood";
+interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; accent?: number; metal?: number; emissive?: number; acc?: Acc; icon: string; }
 const SKINS: Record<string, Skin> = {
-  ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common" },
-  crimson: { name: "Crimson", color: 0x9b1c1c, price: 300, rarity: "rare" },
-  frost: { name: "Frost", color: 0x2a6f97, price: 500, rarity: "rare" },
-  golden: { name: "Golden", color: 0xd4af37, price: 1200, rarity: "epic" },
-  neon: { name: "Neon", color: 0x22ff88, price: 0, rarity: "epic", crateOnly: true },
-  shadow: { name: "Shadow", color: 0x141418, price: 2000, rarity: "legendary" },
+  ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common", accent: 0x2f3a2a, acc: "none", icon: "🪖" },
+  crimson: { name: "Crimson Reaper", color: 0x9b1c1c, price: 300, rarity: "rare", accent: 0xff3b3b, acc: "horns", icon: "😈" },
+  frost: { name: "Frost Ranger", color: 0x2a6f97, price: 500, rarity: "rare", accent: 0x9fe6ff, emissive: 0x1a3a5a, acc: "crown", icon: "❄️" },
+  golden: { name: "Golden Legend", color: 0xd4af37, price: 1200, rarity: "epic", accent: 0xffe08a, metal: 0.9, emissive: 0x3a2e08, acc: "crown", icon: "👑" },
+  neon: { name: "Neon Striker", color: 0x101014, price: 0, rarity: "epic", crateOnly: true, accent: 0x22ff88, emissive: 0x22ff88, acc: "visor", icon: "🟢" },
+  shadow: { name: "Shadow Assassin", color: 0x141418, price: 2000, rarity: "legendary", accent: 0x6b21a8, emissive: 0x2a0a4a, acc: "hood", icon: "🥷" },
 };
 const POTIONS: Record<string, { name: string; icon: string; price: number }> = {
   health: { name: "Health Potion", icon: "❤️", price: 150 },
@@ -111,13 +112,27 @@ export default function Game() {
   const [winCoins, setWinCoins] = useState(0);
   const [potionHud, setPotionHud] = useState({ health: 0, shield: 0, speed: 0 });
   const [shieldHud, setShieldHud] = useState(0);
+  const [showControls, setShowControls] = useState(false);
+  const [crateOpening, setCrateOpening] = useState<Rarity | null>(null);
   const metaRef = useRef<Meta>(defaultMeta());
   const applyMeta = (m: Meta) => { metaRef.current = m; setMeta(m); saveMeta(m); };
   const buySkin = (id: string) => { const s = SKINS[id]; if (!s || s.crateOnly || meta.skins.includes(id) || meta.coins < s.price) return; applyMeta({ ...meta, coins: meta.coins - s.price, skins: [...meta.skins, id], skin: id }); };
   const equipSkin = (id: string) => { if (!meta.skins.includes(id)) return; applyMeta({ ...meta, skin: id }); };
   const buyPotion = (id: string) => { const p = POTIONS[id]; if (!p || meta.coins < p.price) return; applyMeta({ ...meta, coins: meta.coins - p.price, potions: { ...meta.potions, [id]: (meta.potions[id] || 0) + 1 } }); };
   const buyCoins = (amt: number) => applyMeta({ ...meta, coins: meta.coins + amt });
-  const openCrate = (crate: Rarity) => { const c = CRATES[crate]; if (meta.coins < c.price) return; const rew = openCrateReward(crate, meta); const m2: Meta = { ...meta, coins: meta.coins - c.price, skins: [...meta.skins], weapons: [...meta.weapons], potions: { ...meta.potions } }; let label = ""; if (rew.kind === "weapon") { m2.weapons.push(rew.id); label = `${WEAPONS[rew.id].name} UNLOCKED!`; } else if (rew.kind === "skin") { m2.skins.push(rew.id); label = `${SKINS[rew.id].name} skin!`; } else if (rew.kind === "potion") { m2.potions[rew.id] = (m2.potions[rew.id] || 0) + 1; label = `${POTIONS[rew.id].icon} ${POTIONS[rew.id].name}`; } else { m2.coins += rew.amount || 0; label = `+${rew.amount} coins`; } applyMeta(m2); setCrateReveal({ label, rarity: rew.rarity }); };
+  const openCrate = (crate: Rarity) => {
+    if (crateOpening) return; const c = CRATES[crate]; if (meta.coins < c.price) return;
+    applyMeta({ ...meta, coins: meta.coins - c.price }); setCrateOpening(crate);
+    window.setTimeout(() => {
+      const cur = metaRef.current; const rew = openCrateReward(crate, cur);
+      const m2: Meta = { ...cur, skins: [...cur.skins], weapons: [...cur.weapons], potions: { ...cur.potions } }; let label = "";
+      if (rew.kind === "weapon") { m2.weapons.push(rew.id); label = `${WEAPONS[rew.id].name} UNLOCKED!`; }
+      else if (rew.kind === "skin") { m2.skins.push(rew.id); label = `${SKINS[rew.id].name}`; }
+      else if (rew.kind === "potion") { m2.potions[rew.id] = (m2.potions[rew.id] || 0) + 1; label = `${POTIONS[rew.id].icon} ${POTIONS[rew.id].name}`; }
+      else { m2.coins += rew.amount || 0; label = `+${rew.amount} coins`; }
+      applyMeta(m2); setCrateOpening(null); setCrateReveal({ label, rarity: rew.rarity });
+    }, 1700);
+  };
 
   const apiRef = useRef<{ start: (mode: Mode, map: number) => void } | null>(null);
   const phaseRef = useRef<Phase>("menu"); phaseRef.current = phase;
@@ -327,21 +342,31 @@ export default function Game() {
     };
     setViewModel("pistol");
 
-    /* ---------- 3rd-person player model ---------- */
+    /* ---------- 3rd-person player model + skins ---------- */
     const pmVest = new THREE.MeshStandardMaterial({ color: 0x4b5320, roughness: 0.85 });
     const pmSkin = new THREE.MeshStandardMaterial({ color: 0xc98d63, roughness: 0.75 });
     const pmDark = new THREE.MeshStandardMaterial({ color: 0x1d1f24, roughness: 0.8 });
+    const pmHelm = new THREE.MeshStandardMaterial({ color: 0x2f3a2a, roughness: 0.7, metalness: 0.1 });
     const playerModel = new THREE.Group();
+    const pmAccessory = new THREE.Group(); playerModel.add(pmAccessory);
     {
       const box = (w: number, h: number, d: number, mat: THREE.Material, y: number, x = 0, z = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; playerModel.add(m); return m; };
       box(0.66, 0.86, 0.4, pmVest, 1.4); box(0.7, 0.5, 0.46, pmDark, 1.45); box(0.58, 0.34, 0.4, pmDark, 0.84);
-      box(0.38, 0.42, 0.4, pmSkin, 2.06); const hel = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), pmDark); hel.position.y = 2.16; hel.castShadow = true; playerModel.add(hel);
+      box(0.38, 0.42, 0.4, pmSkin, 2.06); const hel = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), pmHelm); hel.position.y = 2.16; hel.castShadow = true; playerModel.add(hel);
       box(0.22, 0.8, 0.24, pmDark, 0.45, -0.15); box(0.22, 0.8, 0.24, pmDark, 0.45, 0.15); box(0.26, 0.16, 0.34, pmDark, 0.08, -0.15, 0.04); box(0.26, 0.16, 0.34, pmDark, 0.08, 0.15, 0.04);
       box(0.16, 0.7, 0.18, pmVest, 1.42, -0.36, -0.12).rotation.x = -0.7; box(0.16, 0.7, 0.18, pmVest, 1.42, 0.32, -0.12).rotation.x = -0.7;
       box(0.09, 0.13, 0.66, pmDark, 1.42, 0.0, -0.42);
     }
     playerModel.visible = false; scene.add(playerModel);
-    const applyPlayerSkin = (color: number) => pmVest.color.setHex(color);
+    const buildAccessory = (acc: Acc, accent: number) => {
+      while (pmAccessory.children.length) { const c = pmAccessory.children[0] as THREE.Mesh; pmAccessory.remove(c); c.geometry?.dispose?.(); }
+      const mat = new THREE.MeshStandardMaterial({ color: accent, metalness: 0.7, roughness: 0.3, emissive: accent, emissiveIntensity: 0.3 });
+      if (acc === "horns") for (const sx of [-0.15, 0.15]) { const c = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.32, 6), mat); c.position.set(sx, 2.42, 0); c.rotation.z = sx < 0 ? 0.3 : -0.3; c.castShadow = true; pmAccessory.add(c); }
+      else if (acc === "crown") for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; const c = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 6), mat); c.position.set(Math.cos(a) * 0.2, 2.4, Math.sin(a) * 0.2); c.castShadow = true; pmAccessory.add(c); }
+      else if (acc === "visor") { const v = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.09, 0.05), new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 2 })); v.position.set(0, 2.08, 0.21); pmAccessory.add(v); }
+      else if (acc === "hood") { const h = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.5), new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 })); h.position.y = 2.14; h.castShadow = true; pmAccessory.add(h); }
+    };
+    const applyPlayerSkin = (id: string) => { const s = SKINS[id] || SKINS.ranger; pmVest.color.setHex(s.color); pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0; pmHelm.color.setHex(s.accent ?? s.color); buildAccessory(s.acc ?? "none", s.accent ?? 0xffffff); };
 
     /* ---------- bots ---------- */
     interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; dead?: boolean; home?: THREE.Vector3; respawnAt?: number; }
@@ -442,9 +467,7 @@ export default function Game() {
     function now() { return performance.now(); }
     const tryInteract = () => {
       let bestC: Chest | null = null, bd = 3.6; for (const c of chests) if (!c.opened) { const d = c.pos.distanceTo(camera.position); if (d < bd) { bd = d; bestC = c; } }
-      if (bestC) { openChest(bestC); return; }
-      let bi = -1; bd = 3.6; for (let i = 0; i < doors.length; i++) { const d = doors[i].pos.distanceTo(camera.position); if (d < bd) { bd = d; bi = i; } }
-      if (bi >= 0) { const dr = doors[bi]; dr.open = !dr.open; dr.target = dr.open ? -Math.PI / 1.9 : 0; const c = dr.col; if (dr.open) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } sfx("door"); }
+      if (bestC) openChest(bestC);
     };
 
     const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.thirdPerson = !state.thirdPerson; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); };
@@ -465,7 +488,7 @@ export default function Game() {
       state.won = false; state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag, reserve: WEAPONS.pistol.mag * 2 }; state.equip = 0; setViewModel("pistol"); syncInv();
       state.shield = 0; state.speedUntil = 0; state.thirdPerson = false; playerModel.visible = false; gun.visible = true;
       state.potions = { health: metaRef.current.potions.health || 0, shield: metaRef.current.potions.shield || 0, speed: metaRef.current.potions.speed || 0 }; syncPotions();
-      applyPlayerSkin(SKINS[metaRef.current.skin]?.color ?? 0x4b5320);
+      applyPlayerSkin(metaRef.current.skin || "ranger");
       // varied spawn near cover
       const sp = spawnSpots.length ? spawnSpots[(Math.random() * spawnSpots.length) | 0] : new THREE.Vector3(0, 0, 0);
       camera.position.set(sp.x + (Math.random() - 0.5) * 2, 1.7, sp.z + 2.5); camera.rotation.set(0, Math.atan2(-sp.x, -sp.z), 0);
@@ -517,8 +540,10 @@ export default function Game() {
         if (!counting && state.mouseDown && w.auto && nowt - state.lastShot >= w.rate) shoot();
 
         for (const bz of bushZones) { if ((camera.position.x - bz.x) ** 2 + (camera.position.z - bz.z) ** 2 < bz.r * bz.r) { playerHidden = true; break; } }
-        // interact prompt
-        let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; } if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.6) { pr = "open/close door"; break; }
+        // auto-open doors when the player is near (so buildings are always enterable)
+        for (const dr of doors) { const near = dr.pos.distanceTo(camera.position) < 3.2; if (near !== dr.open) { dr.open = near; dr.target = near ? -Math.PI / 1.9 : 0; const c = dr.col; if (near) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } } }
+        // interact prompt (chests only now)
+        let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; }
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // medkit pickups
         for (const p of pickups) { if (p.active) { p.group.rotation.y += dt * 1.5; p.group.position.y = 0.9 + Math.sin(t * 2) * 0.12; if (state.hp < 100 && camera.position.distanceToSquared(p.pos) < 2.4) { state.hp = Math.min(100, state.hp + 30); p.active = false; p.group.visible = false; p.respawn = nowt + 18000; sfx("heal"); showToast("+30 HP"); syncHud(true); } } else if (nowt > p.respawn) { p.active = true; p.group.visible = true; } }
@@ -644,16 +669,22 @@ export default function Game() {
       )}
 
       {phase === "menu" && (
-        <Overlay><Title />
-          <div className="mt-3 flex items-center gap-3">
-            <span className="rounded-full bg-yellow-400/15 px-3 py-1 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
-            <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 ITEM SHOP</button>
+        <Overlay>
+          <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.07] to-transparent p-6 text-center shadow-2xl sm:p-8">
+            <Title />
+            <p className="mt-1 text-[11px] font-bold tracking-[0.5em] text-cyan-300/70">3D BROWSER FPS</p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+              <span className="rounded-full bg-yellow-400/15 px-3 py-1.5 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
+              <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button>
+              <button onClick={() => setShowControls(true)} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">⌨ CONTROLS</button>
+            </div>
+            <p className="mt-6 text-[11px] uppercase tracking-[0.3em] text-white/40">Mode</p>
+            <div className="mt-2 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
+            <p className="mt-5 text-[11px] uppercase tracking-[0.3em] text-white/40">Map</p>
+            <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-40 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
+            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-7 w-full rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 py-4 text-2xl font-black tracking-wider text-black transition hover:scale-[1.02] hover:brightness-110" style={{ boxShadow: "0 0 45px -6px rgba(0,200,255,0.75)" }}>▶ PLAY</button>
+            <p className="mt-2 text-[11px] text-white/40">Click Play, then move your mouse to look around</p>
           </div>
-          <p className="mt-3 text-sm text-white/55">Pick a mode and a map.</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
-          <p className="mt-7 text-xs uppercase tracking-widest text-white/50">Map</p>
-          <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-44 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
-          <PlayButton label="▶ CLICK TO PLAY" onClick={() => apiRef.current?.start(mode, mapIdx)} /><Controls />
         </Overlay>
       )}
       {phase === "shop" && (
@@ -688,7 +719,7 @@ export default function Game() {
               <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(SKINS).map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
                   <div key={id} className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>
-                    <div className="mx-auto h-16 w-16 rounded-full" style={{ background: `#${s.color.toString(16).padStart(6, "0")}`, boxShadow: `0 0 20px -4px ${col}` }} />
+                    <div className="mx-auto grid h-16 w-16 place-items-center rounded-full text-3xl" style={{ background: `#${s.color.toString(16).padStart(6, "0")}`, boxShadow: `0 0 20px -4px ${col}` }}>{s.icon}</div>
                     <div className="mt-2 font-bold text-sm">{s.name}</div>
                     <div className="text-[10px] uppercase" style={{ color: col }}>{s.rarity}</div>
                     {equipped ? <div className="mt-2 rounded-lg bg-emerald-500/20 py-1.5 text-xs font-bold text-emerald-300">EQUIPPED</div>
@@ -727,13 +758,23 @@ export default function Game() {
             )}
           </div>
 
-          {crateReveal && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80" onClick={() => setCrateReveal(null)}>
-              <div className="rounded-3xl border-4 p-10 text-center" style={{ borderColor: RARITY[crateReveal.rarity].c, boxShadow: `0 0 60px -6px ${RARITY[crateReveal.rarity].c}` }}>
-                <div className="text-6xl">🎁</div>
-                <div className="mt-2 text-xs uppercase tracking-widest" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.rarity}</div>
-                <div className="mt-1 text-2xl font-black" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.label}</div>
-                <button onClick={() => setCrateReveal(null)} className="mt-6 rounded-lg bg-white px-6 py-2 font-bold text-black">AWESOME!</button>
+          {crateOpening && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90">
+              <div className="relative grid place-items-center">
+                <div className="crate-pulse absolute h-56 w-56 rounded-full" style={{ background: `radial-gradient(circle, ${RARITY[crateOpening].c}55, transparent 70%)` }} />
+                <div className="crate-shake relative text-8xl">📦</div>
+              </div>
+              <div className="mt-10 text-sm uppercase tracking-[0.3em]" style={{ color: RARITY[crateOpening].c }}>opening {CRATES[crateOpening].name}…</div>
+            </div>
+          )}
+          {crateReveal && !crateOpening && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center overflow-hidden bg-black/90" onClick={() => setCrateReveal(null)}>
+              <div className="rays-spin pointer-events-none absolute h-[700px] w-[700px] opacity-30" style={{ background: `conic-gradient(${RARITY[crateReveal.rarity].c} 0deg 12deg, transparent 12deg 30deg, ${RARITY[crateReveal.rarity].c} 30deg 42deg, transparent 42deg 60deg, ${RARITY[crateReveal.rarity].c} 60deg 72deg, transparent 72deg 90deg, ${RARITY[crateReveal.rarity].c} 90deg 102deg, transparent 102deg 120deg, ${RARITY[crateReveal.rarity].c} 120deg 132deg, transparent 132deg 150deg, ${RARITY[crateReveal.rarity].c} 150deg 162deg, transparent 162deg 180deg)` }} />
+              <div className="reward-pop relative rounded-3xl border-4 bg-black/70 p-10 text-center" style={{ borderColor: RARITY[crateReveal.rarity].c, boxShadow: `0 0 90px -4px ${RARITY[crateReveal.rarity].c}` }}>
+                <div className="text-7xl">🎁</div>
+                <div className="mt-2 text-xs font-bold uppercase tracking-[0.3em]" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.rarity}</div>
+                <div className="float-up mt-1 text-3xl font-black" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.label}</div>
+                <button onClick={() => setCrateReveal(null)} className="mt-6 rounded-lg bg-white px-8 py-2.5 font-bold text-black transition hover:scale-105">AWESOME!</button>
               </div>
             </div>
           )}
@@ -744,6 +785,16 @@ export default function Game() {
       {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
       {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
       {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-3 text-lg">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
+
+      {showControls && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowControls(false)}>
+          <div className="rounded-2xl border border-white/15 p-7" style={{ background: "rgba(10,12,18,0.96)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-center text-xl font-bold tracking-widest">CONTROLS</h3>
+            <Controls />
+            <button onClick={() => setShowControls(false)} className="mt-6 w-full rounded-lg bg-white/10 py-2 text-sm font-bold hover:bg-white/20">Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -752,4 +803,4 @@ function Overlay({ children }: { children: React.ReactNode }) { return <div clas
 function Title() { return <h1 className="text-center text-5xl font-black tracking-[0.2em] sm:text-7xl"><span className="text-cyan-300">STRIKE</span><span className="text-red-500">ZONE</span></h1>; }
 function ModeCard({ active, onClick, icon, title, desc, soon }: { active: boolean; onClick: () => void; icon: string; title: string; desc: string; soon?: boolean }) { return (<button onClick={onClick} className={`relative w-44 rounded-xl border p-4 text-left transition ${active ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}>{soon && <span className="absolute right-2 top-2 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300">SOON</span>}<div className="text-3xl">{icon}</div><div className="mt-2 font-bold">{title}</div><div className="text-[11px] text-white/55">{desc}</div></button>); }
 function PlayButton({ label, onClick }: { label: string; onClick: () => void }) { return <button onClick={onClick} className="mt-7 rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-3.5 text-lg font-bold text-black transition hover:scale-105 hover:brightness-110">{label}</button>; }
-function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["C / Ctrl", "Crouch"], ["1-7", "Inventory"], ["Scroll", "Swap gun"], ["E", "Chest/Door"], ["R", "Reload"], ["Space", "Jump"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
+function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["C / Ctrl", "Crouch"], ["Space", "Jump"], ["Shift", "Sprint"], ["1-7", "Weapons/items"], ["8 / 9 / 0", "Potions"], ["Scroll", "Swap gun"], ["E", "Open chest"], ["R", "Reload"], ["TAB", "1st/3rd view"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
