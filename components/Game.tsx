@@ -311,32 +311,35 @@ export default function Game() {
       const rand = (a: number, b: number) => a + Math.random() * (b - a);
       const ring = (r: number, n: number, cb: (x: number, z: number, i: number) => void) => { for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.18, 0.18); cb(Math.cos(a) * r, Math.sin(a) * r, i); } };
       const clearOf = (x: number, z: number) => Math.hypot(x, z) > 9;
+      const BUILDINGS_ON = false; // TEST: buildings removed to isolate the barrier
+      const house = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeHouse(a, b, c, dd, e); };
+      const tower = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeTower(a, b, c, dd, e); };
 
       const ground = new THREE.Mesh(new THREE.PlaneGeometry(ARENA * 2, ARENA * 2), new THREE.MeshStandardMaterial({ map: groundTex(P.g[0], P.g[1]), roughness: 1 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; addFloor(ground);
       const bh = 8; for (const [x, z, w, d] of [[0, -ARENA, ARENA * 2, 2], [0, ARENA, ARENA * 2, 2], [-ARENA, 0, 2, ARENA * 2], [ARENA, 0, 2, ARENA * 2]]) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, bh, d), new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 1 })); m.position.set(x, bh / 2, z); addSolid(m, true); }
 
       if (idx === 0) {
         makeWater(40, -34, 60, 48);
-        ring(46, 5, (x, z) => makeHouse(x, z, rand(7, 10), rand(7, 10), P.bld));
-        ring(70, 5, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld));
+        ring(46, 5, (x, z) => house(x, z, rand(7, 10), rand(7, 10), P.bld));
+        ring(70, 5, (x, z) => tower(x, z, rand(9, 12), rand(9, 12), P.bld));
         for (let i = 0; i < 80; i++) { const x = rand(-ARENA + 6, ARENA - 6), z = rand(-ARENA + 6, ARENA - 6); if (Math.hypot(x - 40, z + 34) > 32 && clearOf(x, z)) makeTree(x, z); }
         for (let i = 0; i < 50; i++) makeBush(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6), Math.random() > 0.5);
       } else if (idx === 1) {
         makeWater(0, -78, ARENA * 2, 70);
-        ring(34, 6, (x, z) => makeHouse(x, z, rand(8, 11), rand(8, 11), P.bld));
-        ring(64, 8, (x, z) => makeTower(x, z, rand(10, 13), rand(10, 13), P.bld));
+        ring(34, 6, (x, z) => house(x, z, rand(8, 11), rand(8, 11), P.bld));
+        ring(64, 8, (x, z) => tower(x, z, rand(10, 13), rand(10, 13), P.bld));
         for (let i = 0; i < 70; i++) makeCrate(rand(-70, 70), rand(-55, 80), rand(1.4, 2.8));
         for (let i = 0; i < 22; i++) makeBush(rand(-80, 80), rand(20, 80), Math.random() > 0.5);
       } else if (idx === 2) {
-        ring(24, 7, (x, z) => makeHouse(x, z, rand(7, 10), rand(7, 10), P.bld));
-        ring(50, 9, (x, z) => makeTower(x, z, rand(8, 12), rand(8, 12), P.bld));
-        ring(78, 11, (x, z) => makeHouse(x, z, rand(6, 9), rand(6, 9), P.bld));
+        ring(24, 7, (x, z) => house(x, z, rand(7, 10), rand(7, 10), P.bld));
+        ring(50, 9, (x, z) => tower(x, z, rand(8, 12), rand(8, 12), P.bld));
+        ring(78, 11, (x, z) => house(x, z, rand(6, 9), rand(6, 9), P.bld));
         for (let i = 0; i < 55; i++) makeCrate(rand(-75, 75), rand(-75, 75), rand(1.2, 2.4));
         for (let i = 0; i < 24; i++) makeBush(rand(-75, 75), rand(-75, 75), Math.random() > 0.6);
       } else {
         makeWater(-46, 40, 50, 40);
-        ring(30, 7, (x, z, i) => { makeHouse(x, z, rand(8, 11), rand(8, 11), P.bld); if (i % 2 === 0) makeWater(x * 1.4, z * 1.4, rand(6, 9), rand(5, 8)); });
-        ring(60, 8, (x, z) => makeTower(x, z, rand(9, 12), rand(9, 12), P.bld));
+        ring(30, 7, (x, z, i) => { house(x, z, rand(8, 11), rand(8, 11), P.bld); if (i % 2 === 0) makeWater(x * 1.4, z * 1.4, rand(6, 9), rand(5, 8)); });
+        ring(60, 8, (x, z) => tower(x, z, rand(9, 12), rand(9, 12), P.bld));
         for (let i = 0; i < 60; i++) makeTree(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6));
         for (let i = 0; i < 55; i++) makeBush(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6), Math.random() > 0.4);
       }
