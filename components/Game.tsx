@@ -9,7 +9,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
-type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win";
+type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
@@ -31,7 +31,10 @@ const WEAPONS: Record<string, Weapon> = {
   lmg: { name: "LMG", abbr: "LMG", dmg: 24, rate: 80, mag: 60, auto: true, fov: 48, spread: 0.02, pellets: 1, rarity: "epic" },
   sniper: { name: "Sniper", abbr: "SNP", dmg: 140, rate: 1200, mag: 5, auto: false, fov: 18, spread: 0.0, pellets: 1, rarity: "legendary" },
   dmr: { name: "Marksman", abbr: "DMR", dmg: 72, rate: 340, mag: 10, auto: false, fov: 28, spread: 0.002, pellets: 1, rarity: "legendary" },
+  railgun: { name: "Mythic Railgun", abbr: "RAIL", dmg: 220, rate: 850, mag: 4, auto: false, fov: 24, spread: 0, pellets: 1, rarity: "legendary" },
+  goldak: { name: "Golden AK", abbr: "gAK", dmg: 50, rate: 105, mag: 35, auto: true, fov: 42, spread: 0.007, pellets: 1, rarity: "legendary" },
 };
+const MYTHICS = ["railgun", "goldak"]; // only from legendary crates (luck)
 interface GunSpec { body: number; barrel: number; barrelR: number; mag: number; stock: boolean; scope: boolean; color: number; }
 const GUNSPEC: Record<string, GunSpec> = {
   pistol: { body: 0.32, barrel: 0.14, barrelR: 0.03, mag: 0.2, stock: false, scope: false, color: 0x202227 },
@@ -42,7 +45,42 @@ const GUNSPEC: Record<string, GunSpec> = {
   lmg: { body: 0.82, barrel: 0.55, barrelR: 0.045, mag: 0.42, stock: true, scope: false, color: 0x1a1c20 },
   sniper: { body: 0.82, barrel: 0.62, barrelR: 0.028, mag: 0.2, stock: true, scope: true, color: 0x202830 },
   dmr: { body: 0.7, barrel: 0.5, barrelR: 0.03, mag: 0.26, stock: true, scope: true, color: 0x26221c },
+  railgun: { body: 0.9, barrel: 0.7, barrelR: 0.05, mag: 0.24, stock: true, scope: true, color: 0x1a3a4a },
+  goldak: { body: 0.72, barrel: 0.42, barrelR: 0.04, mag: 0.34, stock: true, scope: false, color: 0xb8860b },
 };
+// ---- meta / shop data ----
+interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; }
+const SKINS: Record<string, Skin> = {
+  ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common" },
+  crimson: { name: "Crimson", color: 0x9b1c1c, price: 300, rarity: "rare" },
+  frost: { name: "Frost", color: 0x2a6f97, price: 500, rarity: "rare" },
+  golden: { name: "Golden", color: 0xd4af37, price: 1200, rarity: "epic" },
+  neon: { name: "Neon", color: 0x22ff88, price: 0, rarity: "epic", crateOnly: true },
+  shadow: { name: "Shadow", color: 0x141418, price: 2000, rarity: "legendary" },
+};
+const POTIONS: Record<string, { name: string; icon: string; price: number }> = {
+  health: { name: "Health Potion", icon: "❤️", price: 150 },
+  shield: { name: "Shield Potion", icon: "🛡️", price: 250 },
+  speed: { name: "Speed Potion", icon: "⚡", price: 200 },
+};
+const CRATES: Record<Rarity, { name: string; price: number }> = {
+  common: { name: "Common Crate", price: 100 }, uncommon: { name: "Uncommon Crate", price: 200 },
+  rare: { name: "Rare Crate", price: 350 }, epic: { name: "Epic Crate", price: 700 }, legendary: { name: "Legendary Crate", price: 1500 },
+};
+const COIN_PACKS = [{ coins: 500, price: "$4.99" }, { coins: 1200, price: "$9.99" }, { coins: 3000, price: "$19.99" }, { coins: 7000, price: "$39.99" }];
+interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]; potions: Record<string, number>; }
+const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 } });
+function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
+function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
+const RARITY_ORDER: Rarity[] = ["common", "uncommon", "rare", "epic", "legendary"];
+type Reward = { kind: "weapon" | "skin" | "potion" | "coins"; id: string; amount?: number; rarity: Rarity };
+function openCrateReward(crate: Rarity, m: Meta): Reward {
+  const ci = RARITY_ORDER.indexOf(crate); const roll = Math.random();
+  if (crate === "legendary" && roll < 0.12) { const locked = MYTHICS.filter((w) => !m.weapons.includes(w)); if (locked.length) return { kind: "weapon", id: locked[(Math.random() * locked.length) | 0], rarity: "legendary" }; }
+  if (roll < 0.15 + ci * 0.1) { const opts = Object.keys(SKINS).filter((k) => RARITY_ORDER.indexOf(SKINS[k].rarity) <= ci && !m.skins.includes(k)); if (opts.length) { const id = opts[(Math.random() * opts.length) | 0]; return { kind: "skin", id, rarity: SKINS[id].rarity }; } }
+  if (roll < 0.82) { const pk = ["health", "shield", "speed"][(Math.random() * 3) | 0]; return { kind: "potion", id: pk, rarity: "common" }; }
+  return { kind: "coins", id: "", amount: [50, 100, 150, 250, 400][ci], rarity: "common" };
+}
 const RARITY: Record<Rarity, { c: string; w: number }> = { common: { c: "#9aa0a8", w: 44 }, uncommon: { c: "#37c871", w: 28 }, rare: { c: "#3a9bff", w: 16 }, epic: { c: "#b15bff", w: 9 }, legendary: { c: "#ffb01f", w: 3 } };
 const RAR_POOL: Record<Rarity, string[]> = { common: ["pistol"], uncommon: ["smg"], rare: ["rifle", "ak"], epic: ["shotgun", "lmg"], legendary: ["sniper", "dmr"] };
 const HEALS: Record<string, { name: string; icon: string; amt: number; rarity: Rarity }> = { bandaid: { name: "Bandaid", icon: "🩹", amt: 15, rarity: "common" }, medkit: { name: "Medkit", icon: "💊", amt: 40, rarity: "rare" } };
@@ -67,9 +105,24 @@ export default function Game() {
   const [hit, setHit] = useState(0); const [dmgFlash, setDmgFlash] = useState(0);
   const [aiming, setAiming] = useState(false); const [hidden, setHidden] = useState(false);
   const [prompt, setPrompt] = useState(""); const [toast, setToast] = useState(""); const [count, setCount] = useState(0); const [crouched, setCrouched] = useState(false);
+  const [meta, setMeta] = useState<Meta>(defaultMeta);
+  const [shopTab, setShopTab] = useState<"crates" | "skins" | "potions" | "coins">("crates");
+  const [crateReveal, setCrateReveal] = useState<{ label: string; rarity: Rarity } | null>(null);
+  const [winCoins, setWinCoins] = useState(0);
+  const [potionHud, setPotionHud] = useState({ health: 0, shield: 0, speed: 0 });
+  const [shieldHud, setShieldHud] = useState(0);
+  const metaRef = useRef<Meta>(defaultMeta());
+  const applyMeta = (m: Meta) => { metaRef.current = m; setMeta(m); saveMeta(m); };
+  const buySkin = (id: string) => { const s = SKINS[id]; if (!s || s.crateOnly || meta.skins.includes(id) || meta.coins < s.price) return; applyMeta({ ...meta, coins: meta.coins - s.price, skins: [...meta.skins, id], skin: id }); };
+  const equipSkin = (id: string) => { if (!meta.skins.includes(id)) return; applyMeta({ ...meta, skin: id }); };
+  const buyPotion = (id: string) => { const p = POTIONS[id]; if (!p || meta.coins < p.price) return; applyMeta({ ...meta, coins: meta.coins - p.price, potions: { ...meta.potions, [id]: (meta.potions[id] || 0) + 1 } }); };
+  const buyCoins = (amt: number) => applyMeta({ ...meta, coins: meta.coins + amt });
+  const openCrate = (crate: Rarity) => { const c = CRATES[crate]; if (meta.coins < c.price) return; const rew = openCrateReward(crate, meta); const m2: Meta = { ...meta, coins: meta.coins - c.price, skins: [...meta.skins], weapons: [...meta.weapons], potions: { ...meta.potions } }; let label = ""; if (rew.kind === "weapon") { m2.weapons.push(rew.id); label = `${WEAPONS[rew.id].name} UNLOCKED!`; } else if (rew.kind === "skin") { m2.skins.push(rew.id); label = `${SKINS[rew.id].name} skin!`; } else if (rew.kind === "potion") { m2.potions[rew.id] = (m2.potions[rew.id] || 0) + 1; label = `${POTIONS[rew.id].icon} ${POTIONS[rew.id].name}`; } else { m2.coins += rew.amount || 0; label = `+${rew.amount} coins`; } applyMeta(m2); setCrateReveal({ label, rarity: rew.rarity }); };
 
   const apiRef = useRef<{ start: (mode: Mode, map: number) => void } | null>(null);
   const phaseRef = useRef<Phase>("menu"); phaseRef.current = phase;
+
+  useEffect(() => { const m = loadMeta(); metaRef.current = m; setMeta(m); }, []);
 
   useEffect(() => {
     const mount = mountRef.current; if (!mount) return;
@@ -274,6 +327,22 @@ export default function Game() {
     };
     setViewModel("pistol");
 
+    /* ---------- 3rd-person player model ---------- */
+    const pmVest = new THREE.MeshStandardMaterial({ color: 0x4b5320, roughness: 0.85 });
+    const pmSkin = new THREE.MeshStandardMaterial({ color: 0xc98d63, roughness: 0.75 });
+    const pmDark = new THREE.MeshStandardMaterial({ color: 0x1d1f24, roughness: 0.8 });
+    const playerModel = new THREE.Group();
+    {
+      const box = (w: number, h: number, d: number, mat: THREE.Material, y: number, x = 0, z = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; playerModel.add(m); return m; };
+      box(0.66, 0.86, 0.4, pmVest, 1.4); box(0.7, 0.5, 0.46, pmDark, 1.45); box(0.58, 0.34, 0.4, pmDark, 0.84);
+      box(0.38, 0.42, 0.4, pmSkin, 2.06); const hel = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), pmDark); hel.position.y = 2.16; hel.castShadow = true; playerModel.add(hel);
+      box(0.22, 0.8, 0.24, pmDark, 0.45, -0.15); box(0.22, 0.8, 0.24, pmDark, 0.45, 0.15); box(0.26, 0.16, 0.34, pmDark, 0.08, -0.15, 0.04); box(0.26, 0.16, 0.34, pmDark, 0.08, 0.15, 0.04);
+      box(0.16, 0.7, 0.18, pmVest, 1.42, -0.36, -0.12).rotation.x = -0.7; box(0.16, 0.7, 0.18, pmVest, 1.42, 0.32, -0.12).rotation.x = -0.7;
+      box(0.09, 0.13, 0.66, pmDark, 1.42, 0.0, -0.42);
+    }
+    playerModel.visible = false; scene.add(playerModel);
+    const applyPlayerSkin = (color: number) => pmVest.color.setHex(color);
+
     /* ---------- bots ---------- */
     interface Bot { group: THREE.Group; head: THREE.Mesh; body: THREE.Mesh; hp: number; speed: number; lastShot: number; roam: THREE.Vector3; dummy: boolean; dying?: boolean; dieAt?: number; dead?: boolean; home?: THREE.Vector3; respawnAt?: number; }
     const bots: Bot[] = []; const botParts: THREE.Object3D[] = [];
@@ -311,13 +380,22 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, thirdPerson: false, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
     const keys: Record<string, boolean> = {};
     const raycaster = new THREE.Raycaster(); const losRay = new THREE.Raycaster(); const downRay = new THREE.Raycaster(); const DOWN = new THREE.Vector3(0, -1, 0);
     const curW = () => { const s = state.inv[state.equip]; return s && s.type === "weapon" && s.wId ? WEAPONS[s.wId] : WEAPONS.pistol; };
     let lastHudSync = 0;
     const syncHud = (force = false) => { const now = performance.now(); if (!force && now - lastHudSync < 80) return; lastHudSync = now; const s = state.inv[state.equip]; const w = curW(); setHud({ hp: Math.max(0, Math.round(state.hp)), ammo: s?.ammo ?? 0, mag: w.mag, reserve: s?.reserve ?? 0, score: state.score, kills: state.kills, shots: state.shots, hits: state.hits, reloading: state.reloading, mode: state.mode, alive: bots.filter((b) => !b.dummy && !b.dying).length, wname: w.name }); };
     const syncInv = () => { setInv(state.inv.map((s) => ({ ...s }))); setEquip(state.equip); };
+    const syncPotions = () => { setPotionHud({ health: state.potions.health, shield: state.potions.shield, speed: state.potions.speed }); setShieldHud(Math.round(state.shield)); };
+    const usePotion = (id: "health" | "shield" | "speed") => {
+      if (!state.alive || (state.potions[id] ?? 0) <= 0) return;
+      if (id === "health") { if (state.hp >= 100) return; state.hp = 100; }
+      else if (id === "shield") state.shield = Math.min(100, state.shield + 50);
+      else state.speedUntil = now() + 15000;
+      state.potions[id]--; metaRef.current.potions[id] = Math.max(0, (metaRef.current.potions[id] ?? 0) - 1); applyMeta({ ...metaRef.current });
+      sfx("heal"); showToast(`${POTIONS[id].icon} ${POTIONS[id].name}`); syncPotions(); syncHud(true);
+    };
     let lastAds = false, lastHidden = false, lastPrompt = "", toastT = 0, lastCount = 0, lastCrouch = false;
 
     const tracers: { line: THREE.Line; life: number }[] = [];
@@ -359,7 +437,7 @@ export default function Game() {
     const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; setViewModel(s.wId!); syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
     const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; state.reloading = false; setViewModel(state.inv[state.equip].wId!); syncInv(); syncHud(true); };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
-    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
+    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = r === "legendary" ? [...RAR_POOL.legendary, ...metaRef.current.weapons] : RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
 
     function now() { return performance.now(); }
     const tryInteract = () => {
@@ -369,7 +447,7 @@ export default function Game() {
       if (bi >= 0) { const dr = doors[bi]; dr.open = !dr.open; dr.target = dr.open ? -Math.PI / 1.9 : 0; const c = dr.col; if (dr.open) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } sfx("door"); }
     };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.thirdPerson = !state.thirdPerson; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -385,6 +463,9 @@ export default function Game() {
       buildMap(idx);
       state.hp = 100; state.score = 0; state.kills = 0; state.shots = 0; state.hits = 0; state.reloading = false; state.alive = true; state.mode = m; state.vel.set(0, 0, 0);
       state.won = false; state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag, reserve: WEAPONS.pistol.mag * 2 }; state.equip = 0; setViewModel("pistol"); syncInv();
+      state.shield = 0; state.speedUntil = 0; state.thirdPerson = false; playerModel.visible = false; gun.visible = true;
+      state.potions = { health: metaRef.current.potions.health || 0, shield: metaRef.current.potions.shield || 0, speed: metaRef.current.potions.speed || 0 }; syncPotions();
+      applyPlayerSkin(SKINS[metaRef.current.skin]?.color ?? 0x4b5320);
       // varied spawn near cover
       const sp = spawnSpots.length ? spawnSpots[(Math.random() * spawnSpots.length) | 0] : new THREE.Vector3(0, 0, 0);
       camera.position.set(sp.x + (Math.random() - 0.5) * 2, 1.7, sp.z + 2.5); camera.rotation.set(0, Math.atan2(-sp.x, -sp.z), 0);
@@ -419,7 +500,7 @@ export default function Game() {
         const feetEye = groundY + eyeH;
 
         if (!counting) {
-          const sprint = keys["ShiftLeft"] ? 1.7 : 1; const accel = 58 * sprint * (1 - 0.45 * state.crouchAmt), damp = 9;
+          const sprint = keys["ShiftLeft"] ? 1.7 : 1; const spd = nowt < state.speedUntil ? 1.5 : 1; const accel = 58 * sprint * spd * (1 - 0.45 * state.crouchAmt), damp = 9;
           state.vel.x -= state.vel.x * damp * dt; state.vel.z -= state.vel.z * damp * dt;
           const fwd = (keys["KeyW"] ? 1 : 0) - (keys["KeyS"] ? 1 : 0); const side = (keys["KeyD"] ? 1 : 0) - (keys["KeyA"] ? 1 : 0);
           if (fwd) state.vel.z -= fwd * accel * dt; if (side) state.vel.x += side * accel * dt;
@@ -446,13 +527,13 @@ export default function Game() {
 
         if (!counting) {
           eye.copy(camera.position);
-          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)) * (1 - 0.4 * state.crouchAmt); if (Math.random() < hc) { state.hp -= 6 + Math.random() * 6; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
+          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)) * (1 - 0.4 * state.crouchAmt); if (Math.random() < hc) { let dmg = 6 + Math.random() * 6; if (state.shield > 0) { const ab = Math.min(state.shield, dmg); state.shield -= ab; dmg -= ab; syncPotions(); } state.hp -= dmg; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
           if (state.mode === "training") for (const b of bots) { if (!b.dummy) continue;
             if (b.dead) { if (now() > (b.respawnAt || 0)) { b.dead = false; b.hp = 100; b.group.visible = true; b.group.rotation.set(0, 0, 0); if (b.home) b.group.position.copy(b.home); botParts.push(b.body, b.head); } continue; }
             if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 7); if (now() > (b.dieAt || 0)) { b.dying = false; b.dead = true; b.group.visible = false; b.respawnAt = now() + 3000; } continue; }
             tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z);
           }
-          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; controls.unlock(); setPhase("win"); }
+          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; const earned = 150 + state.kills * 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); controls.unlock(); setPhase("win"); }
         }
 
         if (state.ads !== lastAds) { lastAds = state.ads; setAiming(state.ads); }
@@ -481,7 +562,20 @@ export default function Game() {
         mc.fillStyle = "#00e5ff"; mc.beginPath(); mc.arc(S / 2, S / 2, 3, 0, Math.PI * 2); mc.fill();
         mc.strokeStyle = "rgba(255,255,255,0.22)"; mc.lineWidth = 2; mc.beginPath(); mc.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); mc.stroke();
       } }
+
+      // 3rd-person camera: offset behind player for render, restore after
+      let savedCam: THREE.Vector3 | null = null;
+      if (state.thirdPerson && controls.isLocked && state.alive) {
+        savedCam = camera.position.clone();
+        const dir = camera.getWorldDirection(new THREE.Vector3());
+        const eyeH2 = 1.7 - state.crouchAmt * 0.75;
+        playerModel.visible = true; gun.visible = false;
+        playerModel.position.set(savedCam.x, savedCam.y - eyeH2, savedCam.z); playerModel.rotation.y = Math.atan2(dir.x, dir.z);
+        let dist = 4.2; losRay.set(savedCam, dir.clone().negate()); losRay.far = dist; const hb = losRay.intersectObjects(solids, false); if (hb.length) dist = Math.max(1.3, hb[0].distance - 0.4);
+        camera.position.addScaledVector(dir, -dist); camera.position.y += 0.55;
+      } else { playerModel.visible = false; gun.visible = true; }
       composer.render();
+      if (savedCam) camera.position.copy(savedCam);
     };
     animate();
 
@@ -533,23 +627,122 @@ export default function Game() {
           </div>
 
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-end justify-between p-5 hud-shadow">
-            <div className="w-56"><div className="mb-1 flex justify-between text-xs"><span className={lowHp ? "text-red-400" : "text-emerald-300"}>HP</span><span>{hud.hp}</span></div><div className="h-3 w-full overflow-hidden rounded-full bg-white/10"><div className={`h-full transition-all ${lowHp ? "bg-red-500" : "bg-emerald-400"}`} style={{ width: `${hud.hp}%` }} /></div><div className="mt-1.5 text-[11px] opacity-60">📦 open chests (E) for guns · 1-7 use slots · scroll = swap gun</div></div>
+            <div className="w-56">
+              {shieldHud > 0 && (<><div className="mb-1 flex justify-between text-xs"><span className="text-cyan-300">🛡 SHIELD</span><span>{shieldHud}</span></div><div className="mb-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full bg-cyan-400" style={{ width: `${shieldHud}%` }} /></div></>)}
+              <div className="mb-1 flex justify-between text-xs"><span className={lowHp ? "text-red-400" : "text-emerald-300"}>HP</span><span>{hud.hp}</span></div>
+              <div className="h-3 w-full overflow-hidden rounded-full bg-white/10"><div className={`h-full transition-all ${lowHp ? "bg-red-500" : "bg-emerald-400"}`} style={{ width: `${hud.hp}%` }} /></div>
+              <div className="mt-2 flex gap-1.5 text-[11px]">
+                <span className="rounded bg-white/10 px-1.5 py-0.5">8 ❤️{potionHud.health}</span>
+                <span className="rounded bg-white/10 px-1.5 py-0.5">9 🛡️{potionHud.shield}</span>
+                <span className="rounded bg-white/10 px-1.5 py-0.5">0 ⚡{potionHud.speed}</span>
+                <span className="rounded bg-white/10 px-1.5 py-0.5 opacity-70">TAB view</span>
+              </div>
+            </div>
             <div className="text-right"><div className="text-3xl font-bold tabular-nums">{hud.reloading ? <span className="text-xl text-yellow-300">RELOADING…</span> : <>{hud.ammo}<span className={`text-base ${hud.reserve <= 0 ? "text-red-400" : "opacity-50"}`}> / {hud.reserve} spare</span></>}</div><div className="text-xs opacity-60">🔫 {hud.wname} <span className="opacity-50">(R reload · RMB aim)</span></div></div>
           </div>
         </>
       )}
 
       {phase === "menu" && (
-        <Overlay><Title /><p className="mt-2 text-sm text-white/55">Pick a mode and a map.</p>
+        <Overlay><Title />
+          <div className="mt-3 flex items-center gap-3">
+            <span className="rounded-full bg-yellow-400/15 px-3 py-1 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
+            <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 ITEM SHOP</button>
+          </div>
+          <p className="mt-3 text-sm text-white/55">Pick a mode and a map.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
           <p className="mt-7 text-xs uppercase tracking-widest text-white/50">Map</p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-44 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
           <PlayButton label="▶ CLICK TO PLAY" onClick={() => apiRef.current?.start(mode, mapIdx)} /><Controls />
         </Overlay>
       )}
+      {phase === "shop" && (
+        <div className="fade-in absolute inset-0 z-10 overflow-y-auto bg-black/85 backdrop-blur-sm">
+          <div className="mx-auto max-w-4xl px-5 py-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-black tracking-widest"><span className="text-violet-300">ITEM</span> <span className="text-cyan-300">SHOP</span></h2>
+              <div className="flex items-center gap-3">
+                <span className="rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">🪙 {meta.coins}</span>
+                <button onClick={() => { setCrateReveal(null); setPhase("menu"); }} className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/10">← Back</button>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2">
+              {(["crates", "skins", "potions", "coins"] as const).map((tb) => (
+                <button key={tb} onClick={() => setShopTab(tb)} className={`rounded-lg px-4 py-2 text-sm font-bold uppercase transition ${shopTab === tb ? "bg-cyan-400 text-black" : "border border-white/15 hover:border-white/40"}`}>{tb === "coins" ? "Buy Coins" : tb}</button>
+              ))}
+            </div>
+
+            {shopTab === "crates" && (
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {(RARITY_ORDER).map((cr) => { const c = CRATES[cr]; const col = RARITY[cr].c; const afford = meta.coins >= c.price; return (
+                  <div key={cr} className="rounded-2xl border-2 p-5 text-center" style={{ borderColor: col, background: "rgba(255,255,255,0.03)" }}>
+                    <div className="mx-auto grid h-20 w-20 place-items-center rounded-xl text-4xl" style={{ background: `${col}22`, boxShadow: `0 0 30px -6px ${col}` }}>📦</div>
+                    <div className="mt-3 font-bold" style={{ color: col }}>{c.name}</div>
+                    <div className="text-[11px] text-white/50">{cr === "legendary" ? "Chance of a MYTHIC weapon!" : "Skins · potions · coins"}</div>
+                    <button disabled={!afford} onClick={() => openCrate(cr)} className="mt-3 w-full rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 py-2 text-sm font-bold text-black disabled:opacity-40">🪙 {c.price} · OPEN</button>
+                  </div>); })}
+              </div>
+            )}
+
+            {shopTab === "skins" && (
+              <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {Object.entries(SKINS).map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
+                  <div key={id} className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>
+                    <div className="mx-auto h-16 w-16 rounded-full" style={{ background: `#${s.color.toString(16).padStart(6, "0")}`, boxShadow: `0 0 20px -4px ${col}` }} />
+                    <div className="mt-2 font-bold text-sm">{s.name}</div>
+                    <div className="text-[10px] uppercase" style={{ color: col }}>{s.rarity}</div>
+                    {equipped ? <div className="mt-2 rounded-lg bg-emerald-500/20 py-1.5 text-xs font-bold text-emerald-300">EQUIPPED</div>
+                      : owned ? <button onClick={() => equipSkin(id)} className="mt-2 w-full rounded-lg bg-white/10 py-1.5 text-xs font-bold hover:bg-white/20">EQUIP</button>
+                      : s.crateOnly ? <div className="mt-2 rounded-lg bg-white/5 py-1.5 text-[11px] text-white/40">🔒 Crate only</div>
+                      : <button disabled={meta.coins < s.price} onClick={() => buySkin(id)} className="mt-2 w-full rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 py-1.5 text-xs font-bold text-black disabled:opacity-40">🪙 {s.price}</button>}
+                  </div>); })}
+              </div>
+            )}
+
+            {shopTab === "potions" && (
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                {Object.entries(POTIONS).map(([id, p]) => (
+                  <div key={id} className="rounded-2xl border border-white/15 p-5 text-center">
+                    <div className="text-4xl">{p.icon}</div>
+                    <div className="mt-2 font-bold">{p.name}</div>
+                    <div className="text-[11px] text-white/50">Owned: {meta.potions[id] || 0}</div>
+                    <button disabled={meta.coins < p.price} onClick={() => buyPotion(id)} className="mt-3 w-full rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 py-2 text-sm font-bold text-black disabled:opacity-40">🪙 {p.price} · BUY</button>
+                  </div>
+                ))}
+                <p className="col-span-full text-center text-xs text-white/45">In a match: press <b>8</b> ❤️ heal · <b>9</b> 🛡️ shield · <b>0</b> ⚡ speed</p>
+              </div>
+            )}
+
+            {shopTab === "coins" && (
+              <div className="mt-6 grid gap-3 sm:grid-cols-4">
+                {COIN_PACKS.map((cp) => (
+                  <div key={cp.coins} className="rounded-2xl border border-yellow-400/30 p-5 text-center">
+                    <div className="text-3xl">🪙</div>
+                    <div className="mt-2 text-2xl font-black text-yellow-300">{cp.coins}</div>
+                    <button onClick={() => buyCoins(cp.coins)} className="mt-3 w-full rounded-lg bg-gradient-to-r from-emerald-400 to-green-500 py-2 text-sm font-bold text-black">{cp.price}</button>
+                  </div>
+                ))}
+                <p className="col-span-full text-center text-xs text-white/45">⚠️ Demo — clicking adds coins instantly, <b>no real charge</b>. (Real payments would need a store/Stripe.)</p>
+              </div>
+            )}
+          </div>
+
+          {crateReveal && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80" onClick={() => setCrateReveal(null)}>
+              <div className="rounded-3xl border-4 p-10 text-center" style={{ borderColor: RARITY[crateReveal.rarity].c, boxShadow: `0 0 60px -6px ${RARITY[crateReveal.rarity].c}` }}>
+                <div className="text-6xl">🎁</div>
+                <div className="mt-2 text-xs uppercase tracking-widest" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.rarity}</div>
+                <div className="mt-1 text-2xl font-black" style={{ color: RARITY[crateReveal.rarity].c }}>{crateReveal.label}</div>
+                <button onClick={() => setCrateReveal(null)} className="mt-6 rounded-lg bg-white px-6 py-2 font-bold text-black">AWESOME!</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {phase === "multiplayer" && (<Overlay><h2 className="text-3xl font-bold tracking-widest text-cyan-300">🌐 ONLINE MULTIPLAYER</h2><p className="mt-4 max-w-md text-center text-sm text-white/70">Real-time online play needs a dedicated game server (WebSockets + netcode) that Vercel can&apos;t host. It&apos;s <span className="text-yellow-300">coming soon</span> — needs a separate realtime backend (Colyseus/Socket.IO on Railway/Fly.io).</p><PlayButton label="← Back" onClick={() => setPhase("menu")} /></Overlay>)}
       {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
-      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
+      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
       {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-3 text-lg">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
     </div>
   );
