@@ -247,18 +247,26 @@ export default function Game() {
       for (let i = 0; i < 2; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), new THREE.MeshStandardMaterial({ color: 0x3a4a3a, metalness: 0.4, roughness: 0.5 })); bar.position.set(cx + (i ? 1 : -1) * w * 0.3, 0.45, cz + d * 0.3); bar.castShadow = true; worldGrp.add(bar); solids.push(bar); }
     };
     const doorWall = (cx: number, cz: number, w: number, d: number, base: string, H: number) => {
-      const T = 0.3, doorW = 2.0, doorH = 2.5;
+      const T = 0.35, gap = 2.6, doorH = 2.5;
       const wmat = () => new THREE.MeshStandardMaterial({ map: winTex(base), roughness: 0.9 });
-      // walls do NOT collide with movement (no invisible barrier) — they still block bullets (in solids) and look solid
-      const wall = (x: number, y: number, z: number, sx: number, sy: number, sz: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wmat()); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; worldGrp.add(m); solids.push(m); };
-      wall(cx, H / 2, cz - d / 2, w, H, T); wall(cx - w / 2, H / 2, cz, T, H, d); wall(cx + w / 2, H / 2, cz, T, H, d);
-      const segW = (w - doorW) / 2;
-      wall(cx - (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T); wall(cx + (doorW / 2 + segW / 2), H / 2, cz + d / 2, segW, H, T);
-      wall(cx, doorH + (H - doorH) / 2, cz + d / 2, doorW, H - doorH, T);
-      // door hangs permanently OPEN (no collider) — doorways are always-clear passages, no barrier
-      const pivot = new THREE.Group(); pivot.position.set(cx - doorW / 2, 0, cz + d / 2); pivot.rotation.y = -1.4; worldGrp.add(pivot);
-      const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.08), new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 })); door.position.set(doorW / 2, doorH / 2, 0); door.castShadow = true; pivot.add(door);
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 1, roughness: 0.3 })); knob.position.set(doorW - 0.15, doorH / 2, 0.08); pivot.add(knob);
+      // SOLID wall segment (collides). AABB computed manually = exact, no phantom barriers.
+      const seg = (x: number, z: number, sx: number, sy: number, sz: number, y: number, col = true) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wmat()); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; worldGrp.add(m); solids.push(m);
+        if (col) pushCol(x - sx / 2, z - sz / 2, x + sx / 2, z + sz / 2);
+      };
+      const segW = (w - gap) / 2, segD = (d - gap) / 2;
+      // front & back walls (with a central doorway gap you can walk through)
+      for (const zz of [cz - d / 2, cz + d / 2]) {
+        seg(cx - (gap / 2 + segW / 2), zz, segW, H, T, H / 2);
+        seg(cx + (gap / 2 + segW / 2), zz, segW, H, T, H / 2);
+        seg(cx, zz, gap, H - doorH, T, doorH + (H - doorH) / 2, false); // lintel above doorway (no collision)
+      }
+      // left & right walls (also with a central doorway gap) → enter from ANY side
+      for (const xx of [cx - w / 2, cx + w / 2]) {
+        seg(xx, cz - (gap / 2 + segD / 2), T, H, segD, H / 2);
+        seg(xx, cz + (gap / 2 + segD / 2), T, H, segD, H / 2);
+        seg(xx, cz, T, H - doorH, gap, doorH + (H - doorH) / 2, false); // lintel
+      }
     };
 
     const makeHouse = (cx: number, cz: number, w: number, d: number, base: string) => {
