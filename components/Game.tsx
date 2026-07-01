@@ -50,7 +50,19 @@ const GUNSPEC: Record<string, GunSpec> = {
 };
 // ---- meta / shop data ----
 type Acc = "none" | "horns" | "crown" | "visor" | "hood";
-interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; accent?: number; metal?: number; emissive?: number; acc?: Acc; icon: string; }
+interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; accent?: number; metal?: number; emissive?: number; acc?: Acc; icon: string; limited?: boolean; }
+const TEAMS: { id: string; name: string; flag: string; color: number }[] = [
+  { id: "bra", name: "Brazil", flag: "🇧🇷", color: 0x009c3b }, { id: "arg", name: "Argentina", flag: "🇦🇷", color: 0x6cace4 },
+  { id: "fra", name: "France", flag: "🇫🇷", color: 0x0055a4 }, { id: "eng", name: "England", flag: "🏴", color: 0xffffff },
+  { id: "esp", name: "Spain", flag: "🇪🇸", color: 0xc60b1e }, { id: "ger", name: "Germany", flag: "🇩🇪", color: 0x111111 },
+  { id: "por", name: "Portugal", flag: "🇵🇹", color: 0x006600 }, { id: "ned", name: "Netherlands", flag: "🇳🇱", color: 0xff6a00 },
+  { id: "ita", name: "Italy", flag: "🇮🇹", color: 0x0066b3 }, { id: "usa", name: "USA", flag: "🇺🇸", color: 0x1a3a6b },
+  { id: "mex", name: "Mexico", flag: "🇲🇽", color: 0x006847 }, { id: "uru", name: "Uruguay", flag: "🇺🇾", color: 0x5cbcf0 },
+  { id: "bel", name: "Belgium", flag: "🇧🇪", color: 0xe30613 }, { id: "cro", name: "Croatia", flag: "🇭🇷", color: 0xd81e2c },
+  { id: "jpn", name: "Japan", flag: "🇯🇵", color: 0xbc002d }, { id: "kor", name: "South Korea", flag: "🇰🇷", color: 0xcd2e3a },
+  { id: "mar", name: "Morocco", flag: "🇲🇦", color: 0xc1272d }, { id: "sen", name: "Senegal", flag: "🇸🇳", color: 0x00853f },
+  { id: "col", name: "Colombia", flag: "🇨🇴", color: 0xfcd116 }, { id: "sui", name: "Switzerland", flag: "🇨🇭", color: 0xd52b1e },
+];
 const SKINS: Record<string, Skin> = {
   ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common", accent: 0x2f3a2a, acc: "none", icon: "🪖" },
   crimson: { name: "Crimson Reaper", color: 0x9b1c1c, price: 300, rarity: "rare", accent: 0xff3b3b, acc: "horns", icon: "😈" },
@@ -58,6 +70,7 @@ const SKINS: Record<string, Skin> = {
   golden: { name: "Golden Legend", color: 0xd4af37, price: 1200, rarity: "epic", accent: 0xffe08a, metal: 0.9, emissive: 0x3a2e08, acc: "crown", icon: "👑" },
   neon: { name: "Neon Striker", color: 0x101014, price: 0, rarity: "epic", crateOnly: true, accent: 0x22ff88, emissive: 0x22ff88, acc: "visor", icon: "🟢" },
   shadow: { name: "Shadow Assassin", color: 0x141418, price: 2000, rarity: "legendary", accent: 0x6b21a8, emissive: 0x2a0a4a, acc: "hood", icon: "🥷" },
+  worldcup: { name: "World Cup 2026 ⚽", color: 0xd4af37, price: 2500, rarity: "legendary", accent: 0xffe08a, metal: 0.85, emissive: 0x4a3a10, acc: "crown", icon: "🏆", limited: true },
 };
 const POTIONS: Record<string, { name: string; icon: string; price: number }> = {
   health: { name: "Health Potion", icon: "❤️", price: 150 },
@@ -69,8 +82,8 @@ const CRATES: Record<Rarity, { name: string; price: number }> = {
   rare: { name: "Rare Crate", price: 350 }, epic: { name: "Epic Crate", price: 700 }, legendary: { name: "Legendary Crate", price: 1500 },
 };
 const COIN_PACKS = [{ coins: 500, price: "$4.99" }, { coins: 1200, price: "$9.99" }, { coins: 3000, price: "$19.99" }, { coins: 7000, price: "$39.99" }];
-interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]; potions: Record<string, number>; }
-const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 } });
+interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]; potions: Record<string, number>; team: string; }
+const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 }, team: "" });
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
 interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; crosshair: string; binds: Record<string, string>; }
@@ -120,6 +133,9 @@ export default function Game() {
   const [shieldHud, setShieldHud] = useState(0);
   const [showControls, setShowControls] = useState(false);
   const [crateOpening, setCrateOpening] = useState<Rarity | null>(null);
+  const [showTeams, setShowTeams] = useState(false);
+  const [showLocker, setShowLocker] = useState(false);
+  const [goalShow, setGoalShow] = useState(false);
   const metaRef = useRef<Meta>(defaultMeta());
   const applyMeta = (m: Meta) => { metaRef.current = m; setMeta(m); saveMeta(m); };
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -311,7 +327,7 @@ export default function Game() {
       const rand = (a: number, b: number) => a + Math.random() * (b - a);
       const ring = (r: number, n: number, cb: (x: number, z: number, i: number) => void) => { for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.18, 0.18); cb(Math.cos(a) * r, Math.sin(a) * r, i); } };
       const clearOf = (x: number, z: number) => Math.hypot(x, z) > 9;
-      const BUILDINGS_ON = false; // TEST: buildings removed to isolate the barrier
+      const BUILDINGS_ON = true; // buildings back on (walls no longer collide → no barrier)
       const house = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeHouse(a, b, c, dd, e); };
       const tower = (a: number, b: number, c: number, dd: number, e: string) => { if (BUILDINGS_ON) makeTower(a, b, c, dd, e); };
 
@@ -460,6 +476,7 @@ export default function Game() {
     let lastAds = false, lastHidden = false, lastPrompt = "", toastT = 0, lastCount = 0, lastCrouch = false;
 
     const tracers: { line: THREE.Line; life: number }[] = [];
+    const ballTrail: { m: THREE.Mesh; life: number }[] = [];
     const addTracer = (from: THREE.Vector3, to: THREE.Vector3, color = 0xfff2a0) => { const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })); worldGrp.add(line); tracers.push({ line, life: 0.06 }); };
 
     const reload = () => { const s = state.inv[state.equip]; if (s.type !== "weapon") return; const w = curW(); if (state.reloading || (s.ammo ?? 0) >= w.mag || (s.reserve ?? 0) <= 0) return; state.reloading = true; syncHud(true); sfx("reload"); window.setTimeout(() => { const need = w.mag - (s.ammo ?? 0); const take = Math.min(need, s.reserve ?? 0); s.ammo = (s.ammo ?? 0) + take; s.reserve = (s.reserve ?? 0) - take; state.reloading = false; syncHud(true); }, 1100); };
@@ -588,9 +605,14 @@ export default function Game() {
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // soccer kick animation (invulnerable while it plays)
         if (soccer?.kicking) {
-          const p = Math.min(1, (nowt - soccer.kickStart) / 1500);
-          soccer.ball.position.lerpVectors(soccer.home, soccer.goal, p); soccer.ball.position.y = soccer.home.y + Math.sin(p * Math.PI) * 3.2; soccer.ball.rotation.x += dt * 14;
-          if (p >= 1) { soccer.kicking = false; state.invuln = false; state.lastKickKills = state.kills; metaRef.current.coins += 100; applyMeta({ ...metaRef.current }); showToast("⚽ GOAL! +100 🪙"); const s2 = soccer; window.setTimeout(() => { if (s2) { s2.ball.position.copy(s2.home); s2.ball.rotation.set(0, 0, 0); } }, 1400); }
+          const p = Math.min(1, (nowt - soccer.kickStart) / 1600);
+          soccer.ball.position.lerpVectors(soccer.home, soccer.goal, p);
+          soccer.ball.position.y = soccer.home.y + Math.sin(p * Math.PI) * 4.5; // high arc
+          soccer.ball.position.x += Math.sin(p * Math.PI) * 1.2; // curve (banana kick)
+          soccer.ball.rotation.x += dt * 22; soccer.ball.rotation.z += dt * 10;
+          // motion-blur trail
+          const gm = new THREE.Mesh(new THREE.SphereGeometry(0.36, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false })); gm.position.copy(soccer.ball.position); worldGrp.add(gm); ballTrail.push({ m: gm, life: 0.4 });
+          if (p >= 1) { soccer.kicking = false; state.lastKickKills = state.kills; metaRef.current.coins += 100; applyMeta({ ...metaRef.current }); setGoalShow(true); window.setTimeout(() => setGoalShow(false), 2800); window.setTimeout(() => { state.invuln = false; }, 2600); const s2 = soccer; window.setTimeout(() => { if (s2) { s2.ball.position.copy(s2.home); s2.ball.rotation.set(0, 0, 0); } }, 1800); }
         }
         // medkit pickups
         for (const p of pickups) { if (p.active) { p.group.rotation.y += dt * 1.5; p.group.position.y = 0.9 + Math.sin(t * 2) * 0.12; if (state.hp < 100 && camera.position.distanceToSquared(p.pos) < 2.4) { state.hp = Math.min(100, state.hp + 30); p.active = false; p.group.visible = false; p.respawn = nowt + 18000; sfx("heal"); showToast("+30 HP"); syncHud(true); } } else if (nowt > p.respawn) { p.active = true; p.group.visible = true; } }
@@ -614,6 +636,7 @@ export default function Game() {
         syncHud();
       }
       for (let i = tracers.length - 1; i >= 0; i--) { tracers[i].life -= dt; const m = tracers[i].line.material as THREE.LineBasicMaterial; m.opacity = Math.max(0, tracers[i].life / 0.06) * 0.9; if (tracers[i].life <= 0) { worldGrp.remove(tracers[i].line); tracers[i].line.geometry.dispose(); (tracers[i].line.material as THREE.Material).dispose(); tracers.splice(i, 1); } }
+      for (let i = ballTrail.length - 1; i >= 0; i--) { ballTrail[i].life -= dt; const m = ballTrail[i].m.material as THREE.MeshBasicMaterial; m.opacity = Math.max(0, ballTrail[i].life / 0.4) * 0.45; if (ballTrail[i].life <= 0) { worldGrp.remove(ballTrail[i].m); ballTrail[i].m.geometry.dispose(); m.dispose(); ballTrail.splice(i, 1); } }
 
       // minimap radar
       const mini = miniRef.current;
@@ -673,6 +696,8 @@ export default function Game() {
         <>
           {/* countdown */}
           {count > 0 && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="text-8xl font-black text-cyan-300 hud-shadow" style={{ textShadow: "0 0 30px rgba(0,200,255,0.7)" }}>{count}</div></div>}
+          {/* soccer goal celebration */}
+          {goalShow && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><div className="reward-pop text-center"><div className="text-8xl">⚽🎉</div><div className="text-7xl font-black text-yellow-300" style={{ textShadow: "0 0 40px rgba(255,200,40,0.9)" }}>GOOOOAL!</div><div className="mt-2 text-3xl font-bold text-white">+100 🪙</div><div className="mt-1 text-sm text-white/60">🛡️ invincible…</div></div></div>}
 
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: settings.crosshair }}>
             {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
@@ -725,12 +750,17 @@ export default function Game() {
 
       {phase === "menu" && (
         <Overlay>
+          <button onClick={() => setShowTeams(true)} className="absolute right-4 top-4 flex items-center gap-2 rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-sm font-bold backdrop-blur hover:bg-white/10">
+            <span className="text-lg">{meta.team ? TEAMS.find((t) => t.id === meta.team)?.flag : "🏆"}</span>
+            {meta.team ? TEAMS.find((t) => t.id === meta.team)?.name : "Pick your team"}
+          </button>
           <div className="w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.08] to-transparent p-8 text-center shadow-2xl sm:p-12">
             <Title />
             <p className="mt-2 text-sm font-bold tracking-[0.5em] text-cyan-300/70">3D BROWSER FPS</p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
               <span className="rounded-full bg-yellow-400/15 px-3 py-1.5 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
               <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button>
+              <button onClick={() => setShowLocker(true)} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">🎒 LOCKER</button>
               <button onClick={() => setPhase("settings")} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">⚙️ SETTINGS</button>
             </div>
             <p className="mt-6 text-[11px] uppercase tracking-[0.3em] text-white/40">Mode</p>
@@ -773,7 +803,7 @@ export default function Game() {
             {shopTab === "skins" && (
               <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(SKINS).map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
-                  <div key={id} className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>
+                  <div key={id} className="relative rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>{s.limited && <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-red-500 px-2 py-0.5 text-[9px] font-bold">⏳ LIMITED</span>}
                     <div className="mx-auto grid place-items-center rounded-xl py-2" style={{ boxShadow: `0 0 20px -6px ${col}` }}><SkinAvatar s={s} /></div>
                     <div className="mt-2 font-bold text-sm">{s.name}</div>
                     <div className="text-[10px] uppercase" style={{ color: col }}>{s.rarity}</div>
@@ -882,6 +912,39 @@ export default function Game() {
             <h3 className="text-center text-xl font-bold tracking-widest">CONTROLS</h3>
             <Controls />
             <button onClick={() => setShowControls(false)} className="mt-6 w-full rounded-lg bg-white/10 py-2 text-sm font-bold hover:bg-white/20">Close</button>
+          </div>
+        </div>
+      )}
+
+      {showTeams && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-4" onClick={() => setShowTeams(false)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/15 p-6" style={{ background: "rgba(10,12,18,0.97)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-center text-2xl font-black tracking-widest">🏆 CHOOSE YOUR TEAM</h3>
+            <p className="mt-1 text-center text-xs text-white/50">World Cup 2026 — who are you repping?</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {TEAMS.map((t) => (
+                <button key={t.id} onClick={() => { applyMeta({ ...meta, team: t.id }); setShowTeams(false); }} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-bold transition ${meta.team === t.id ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><span className="text-xl">{t.flag}</span> {t.name}</button>
+              ))}
+            </div>
+            <button onClick={() => setShowTeams(false)} className="mt-5 w-full rounded-lg bg-white/10 py-2 text-sm font-bold hover:bg-white/20">Close</button>
+          </div>
+        </div>
+      )}
+
+      {showLocker && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-4" onClick={() => setShowLocker(false)}>
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/15 p-6" style={{ background: "rgba(10,12,18,0.97)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-center text-2xl font-black tracking-widest">🎒 YOUR LOCKER</h3>
+            <p className="mt-1 text-center text-xs text-white/50">{meta.skins.length} skin{meta.skins.length !== 1 ? "s" : ""} owned · click to equip</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {meta.skins.map((id) => { const s = SKINS[id]; if (!s) return null; const eq = meta.skin === id; const col = RARITY[s.rarity].c; return (
+                <div key={id} className="rounded-2xl border-2 p-3 text-center" style={{ borderColor: col }}>
+                  <div className="py-1"><SkinAvatar s={s} /></div>
+                  <div className="mt-1 text-xs font-bold">{s.name}</div>
+                  {eq ? <div className="mt-2 rounded bg-emerald-500/20 py-1 text-[11px] font-bold text-emerald-300">EQUIPPED</div> : <button onClick={() => applyMeta({ ...meta, skin: id })} className="mt-2 w-full rounded bg-white/10 py-1 text-[11px] font-bold hover:bg-white/20">EQUIP</button>}
+                </div>); })}
+            </div>
+            <button onClick={() => setShowLocker(false)} className="mt-5 w-full rounded-lg bg-white/10 py-2 text-sm font-bold hover:bg-white/20">Close</button>
           </div>
         </div>
       )}
