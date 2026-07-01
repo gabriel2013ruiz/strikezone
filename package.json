@@ -2,11 +2,30 @@
   "name": "strikezone",
   "version": "0.1.0",
   "private": true,
+  "description": "STRIKEZONE — a fast 3D FPS",
+  "author": "gabriel2013ruiz",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export:web": "BUILD_TARGET=electron next build",
+    "electron": "electron .",
+    "desktop": "npm run export:web && electron .",
+    "dist": "npm run export:web && electron-builder",
+    "dist:mac": "npm run export:web && electron-builder --mac",
+    "dist:win": "npm run export:web && electron-builder --win --x64",
+    "dist:linux": "npm run export:web && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.gabriel2013ruiz.strikezone",
+    "productName": "STRIKEZONE",
+    "directories": { "output": "dist-electron" },
+    "files": ["electron/**/*", "out/**/*", "package.json"],
+    "mac": { "target": "dmg", "category": "public.app-category.games" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage", "category": "Game" }
   },
   "dependencies": {
     "next": "16.2.9",
@@ -20,6 +39,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.0",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
