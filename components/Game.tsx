@@ -109,7 +109,7 @@ export default function Game() {
   const [meta, setMeta] = useState<Meta>(defaultMeta);
   const [shopTab, setShopTab] = useState<"crates" | "skins" | "potions" | "coins">("crates");
   const [crateReveal, setCrateReveal] = useState<{ label: string; rarity: Rarity } | null>(null);
-  const [winCoins, setWinCoins] = useState(0);
+  const [winCoins, setWinCoins] = useState(0); const [place, setPlace] = useState(0);
   const [potionHud, setPotionHud] = useState({ health: 0, shield: 0, speed: 0 });
   const [shieldHud, setShieldHud] = useState(0);
   const [showControls, setShowControls] = useState(false);
@@ -176,11 +176,12 @@ export default function Game() {
     const chests: Chest[] = [];
     interface Ground { group: THREE.Group; pos: THREE.Vector3; kind: "weapon" | "heal"; id: string; }
     const grounds: Ground[] = [];
+    let soccer: { ball: THREE.Mesh; home: THREE.Vector3; goal: THREE.Vector3; kicking: boolean; kickStart: number } | null = null;
 
     const clearWorld = () => {
       worldGrp.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); const m = o.material; Array.isArray(m) ? m.forEach((x) => x.dispose()) : m.dispose(); } });
       while (worldGrp.children.length) worldGrp.remove(worldGrp.children[0]);
-      solids.length = 0; floors.length = 0; colliders.length = 0; spawnSpots.length = 0; spawns.length = 0; waterUpdaters.length = 0; bushZones.length = 0; doors.length = 0; pickups.length = 0; chests.length = 0; grounds.length = 0;
+      solids.length = 0; floors.length = 0; colliders.length = 0; spawnSpots.length = 0; spawns.length = 0; waterUpdaters.length = 0; bushZones.length = 0; doors.length = 0; pickups.length = 0; chests.length = 0; grounds.length = 0; soccer = null;
     };
     const pushCol = (a: number, b: number, c: number, d: number): Col => { const col = { minx: a, minz: b, maxx: c, maxz: d }; colliders.push(col); return col; };
     const addSolid = (m: THREE.Mesh, col = true) => { worldGrp.add(m); solids.push(m); if (col) { const b = new THREE.Box3().setFromObject(m); pushCol(b.min.x, b.min.z, b.max.x, b.max.z); } };
@@ -206,7 +207,7 @@ export default function Game() {
       for (let i = 0; i < 2; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), new THREE.MeshStandardMaterial({ color: 0x3a4a3a, metalness: 0.4, roughness: 0.5 })); bar.position.set(cx + (i ? 1 : -1) * w * 0.3, 0.45, cz + d * 0.3); bar.castShadow = true; addSolid(bar, true); }
     };
     const doorWall = (cx: number, cz: number, w: number, d: number, base: string, H: number) => {
-      const T = 0.3, doorW = 1.5, doorH = 2.3;
+      const T = 0.3, doorW = 2.0, doorH = 2.5;
       const wmat = () => new THREE.MeshStandardMaterial({ map: winTex(base), roughness: 0.9 });
       const wall = (x: number, y: number, z: number, sx: number, sy: number, sz: number, col = true) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wmat()); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; worldGrp.add(m); solids.push(m); if (col) { const b = new THREE.Box3().setFromObject(m); pushCol(b.min.x, b.min.z, b.max.x, b.max.z); } };
       wall(cx, H / 2, cz - d / 2, w, H, T); wall(cx - w / 2, H / 2, cz, T, H, d); wall(cx + w / 2, H / 2, cz, T, H, d);
@@ -225,22 +226,24 @@ export default function Game() {
       const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), new THREE.MeshStandardMaterial({ color: 0x6b5b48, roughness: 1 })); floor.position.set(cx, 0.05, cz); floor.receiveShadow = true; addFloor(floor);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.3, d + 0.4), new THREE.MeshStandardMaterial({ color: 0x7a3b2e, roughness: 0.95 })); roof.position.set(cx, H + 0.15, cz); roof.castShadow = true; worldGrp.add(roof); solids.push(roof);
       furnish(cx, cz, w, d);
+      if (Math.random() < 0.55) makeChest(cx + w / 4, cz - d / 6);
       spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
     const makeTower = (cx: number, cz: number, w: number, d: number, base: string) => {
-      const H = 6.4; doorWall(cx, cz, w, d, base, H);
+      const H = 5.2; doorWall(cx, cz, w, d, base, H);
       const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 1 })); floor.position.set(cx, 0.05, cz); floor.receiveShadow = true; addFloor(floor);
-      // roof covers all but a +x gap strip (the internal stairwell exits there)
-      const gapW = 2.4; const roofW = w - gapW;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(roofW, 0.3, d), new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 1 })); roof.position.set(cx - gapW / 2, H, cz); roof.castShadow = true; roof.receiveShadow = true; addFloor(roof);
+      // roof covers all but a -x gap strip (the internal stairwell exits there, away from the +z door)
+      const gapW = 2.6; const roofW = w - gapW;
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(roofW, 0.3, d), new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 1 })); roof.position.set(cx + gapW / 2, H, cz); roof.castShadow = true; roof.receiveShadow = true; addFloor(roof);
       const rh = 1, rt = 0.25;
       const rail = (x: number, z: number, sx: number, sz: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, rh, sz), new THREE.MeshStandardMaterial({ color: 0x3a3a42 })); m.position.set(x, H + rh / 2, z); addSolid(m, true); };
-      rail(cx - gapW / 2, cz - d / 2, roofW, rt); rail(cx - gapW / 2, cz + d / 2, roofW, rt); rail(cx - w / 2, cz, rt, d);
-      // INTERNAL staircase: rises front->back inside the +x gap strip up to the roof
-      const stairX = cx + w / 2 - gapW / 2; const steps = Math.round(H / 0.42); const stepH = H / steps; const run = (d - 2.2) / steps;
-      for (let i = 0; i <= steps; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(1.8, stepH, Math.max(0.7, run + 0.25)), new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 1 })); st.position.set(stairX, (i + 0.5) * stepH, cz + d / 2 - 1.1 - i * run); st.castShadow = true; st.receiveShadow = true; addFloor(st); }
-      furnish(cx, cz - d * 0.15, w, d);
+      rail(cx + gapW / 2, cz - d / 2, roofW, rt); rail(cx + gapW / 2, cz + d / 2, roofW, rt); rail(cx + w / 2, cz, rt, d);
+      // INTERNAL staircase along the -x wall (far from the door), rising back->front to the roof gap
+      const stairX = cx - w / 2 + gapW / 2; const steps = Math.round(H / 0.42); const stepH = H / steps; const run = (d - 2.4) / steps;
+      for (let i = 0; i <= steps; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(1.9, stepH, Math.max(0.75, run + 0.25)), new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 1 })); st.position.set(stairX, (i + 0.5) * stepH, cz - d / 2 + 1.2 + i * run); st.castShadow = true; st.receiveShadow = true; addFloor(st); }
+      furnish(cx, cz - d * 0.28, w * 0.7, d * 0.45);
+      makeChest(cx + w / 5, cz - d / 5);
       spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
@@ -266,6 +269,19 @@ export default function Game() {
       g.position.set(x, 0, z); worldGrp.add(g);
       chests.push({ group: g, pos: new THREE.Vector3(x, 0.6, z), opened: false, glow, lid });
       spawnSpots.push(new THREE.Vector3(x, 0, z));
+    };
+
+    const makeSoccer = (cx: number, cz: number) => {
+      const field = new THREE.Mesh(new THREE.PlaneGeometry(22, 15), new THREE.MeshStandardMaterial({ color: 0x2f7d3f, roughness: 1 })); field.rotation.x = -Math.PI / 2; field.position.set(cx, 0.04, cz); field.receiveShadow = true; worldGrp.add(field);
+      const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 15), new THREE.MeshStandardMaterial({ color: 0xffffff })); cl.rotation.x = -Math.PI / 2; cl.position.set(cx, 0.05, cz); worldGrp.add(cl);
+      const gx = cx + 10; const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
+      const post = (x: number, z: number) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.6, 0.22), white); m.position.set(x, 1.3, z); m.castShadow = true; worldGrp.add(m); solids.push(m); };
+      post(gx, cz - 2.5); post(gx, cz + 2.5);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 5.2), white); bar.position.set(gx, 2.6, cz); worldGrp.add(bar); solids.push(bar);
+      const net = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 2.6), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.15, side: THREE.DoubleSide })); net.position.set(gx + 0.6, 1.3, cz); net.rotation.y = Math.PI / 2; worldGrp.add(net);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.1 })); ball.position.set(cx, 0.4, cz); ball.castShadow = true; worldGrp.add(ball);
+      soccer = { ball, home: new THREE.Vector3(cx, 0.4, cz), goal: new THREE.Vector3(gx - 0.8, 1.2, cz), kicking: false, kickStart: 0 };
+      spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
     const buildMap = (idx: number) => {
@@ -313,6 +329,7 @@ export default function Game() {
       for (let i = 0; i < 26; i++) { const x = rand(-ARENA + 8, ARENA - 8), z = rand(-ARENA + 8, ARENA - 8); if (Math.hypot(x, z) < 11) continue; if (Math.random() < 0.5) { const rr = 0.6 + Math.random() * 1.2; const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rr, 0), new THREE.MeshStandardMaterial({ color: 0x6b6b70, roughness: 1, flatShading: true })); rock.position.set(x, rr * 0.5, z); rock.castShadow = true; rock.receiveShadow = true; addSolid(rock, true); } else { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 12), new THREE.MeshStandardMaterial({ color: [0x8a3b2e, 0x3a4a3a, 0x2e6a7a][(Math.random() * 3) | 0], metalness: 0.5, roughness: 0.5 })); bar.position.set(x, 0.55, z); bar.castShadow = true; addSolid(bar, true); } }
       // chests + medkits
       ring(38, 8, (x, z) => makeChest(x, z)); ring(64, 6, (x, z) => makeChest(x, z));
+      makeSoccer(ARENA - 26, -ARENA + 26); // hidden soccer field in a corner
       for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2 + 0.3; const r = 20 + (i % 3) * 22; makeMedkit(Math.cos(a) * r, Math.sin(a) * r); }
       ring(82, 14, (x, z) => spawns.push(new THREE.Vector3(x, 0, z)));
       scene.background = tex((c, s) => { const g = c.createLinearGradient(0, 0, 0, s); g.addColorStop(0, P.sky[0]); g.addColorStop(1, P.sky[1]); c.fillStyle = g; c.fillRect(0, 0, s, s); });
@@ -405,7 +422,7 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, thirdPerson: false, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, camMode: 0, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, invuln: false, lastKickKills: 0, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
     const keys: Record<string, boolean> = {};
     const raycaster = new THREE.Raycaster(); const losRay = new THREE.Raycaster(); const downRay = new THREE.Raycaster(); const DOWN = new THREE.Vector3(0, -1, 0);
     const curW = () => { const s = state.inv[state.equip]; return s && s.type === "weapon" && s.wId ? WEAPONS[s.wId] : WEAPONS.pistol; };
@@ -469,8 +486,9 @@ export default function Game() {
       let bestC: Chest | null = null, bd = 3.6; for (const c of chests) if (!c.opened) { const d = c.pos.distanceTo(camera.position); if (d < bd) { bd = d; bestC = c; } }
       if (bestC) openChest(bestC);
     };
+    const tryKick = () => { if (!soccer || soccer.kicking || !state.alive) return; if (camera.position.distanceTo(soccer.home) > 3.8) return; if (state.kills - state.lastKickKills < 4) return; soccer.kicking = true; soccer.kickStart = now(); state.invuln = true; sfx("shoot"); showToast("⚽ KICK!"); };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.thirdPerson = !state.thirdPerson; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; if (e.code === "KeyR") reload(); if (e.code === "KeyE") tryInteract(); if (e.code === "Space" && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.camMode = (state.camMode + 1) % 3; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); if (e.code === "KeyF") tryKick(); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -486,7 +504,7 @@ export default function Game() {
       buildMap(idx);
       state.hp = 100; state.score = 0; state.kills = 0; state.shots = 0; state.hits = 0; state.reloading = false; state.alive = true; state.mode = m; state.vel.set(0, 0, 0);
       state.won = false; state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag, reserve: WEAPONS.pistol.mag * 2 }; state.equip = 0; setViewModel("pistol"); syncInv();
-      state.shield = 0; state.speedUntil = 0; state.thirdPerson = false; playerModel.visible = false; gun.visible = true;
+      state.shield = 0; state.speedUntil = 0; state.camMode = 0; state.invuln = false; state.lastKickKills = 0; playerModel.visible = false; gun.visible = true;
       state.potions = { health: metaRef.current.potions.health || 0, shield: metaRef.current.potions.shield || 0, speed: metaRef.current.potions.speed || 0 }; syncPotions();
       applyPlayerSkin(metaRef.current.skin || "ranger");
       // varied spawn near cover
@@ -497,7 +515,7 @@ export default function Game() {
       state.countEnd = now() + 3000; syncHud(true);
     };
     apiRef.current = { start: (m, idx) => { if (!state.alive || phaseRef.current === "menu" || phaseRef.current === "dead") reset(m, idx); controls.lock(); } };
-    const die = () => { state.alive = false; controls.unlock(); setPhase("dead"); };
+    const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(placement); controls.unlock(); setPhase("dead"); };
     const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
     window.addEventListener("resize", onResize);
 
@@ -541,10 +559,17 @@ export default function Game() {
 
         for (const bz of bushZones) { if ((camera.position.x - bz.x) ** 2 + (camera.position.z - bz.z) ** 2 < bz.r * bz.r) { playerHidden = true; break; } }
         // auto-open doors when the player is near (so buildings are always enterable)
-        for (const dr of doors) { const near = dr.pos.distanceTo(camera.position) < 3.2; if (near !== dr.open) { dr.open = near; dr.target = near ? -Math.PI / 1.9 : 0; const c = dr.col; if (near) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } } }
-        // interact prompt (chests only now)
+        for (const dr of doors) { const near = dr.pos.distanceTo(camera.position) < 4.2; if (near !== dr.open) { dr.open = near; dr.target = near ? -Math.PI / 1.9 : 0; const c = dr.col; if (near) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } } }
+        // interact prompt (chests + soccer)
         let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; }
+        if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? "kick the ball ⚽ (F)" : `kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
+        // soccer kick animation (invulnerable while it plays)
+        if (soccer?.kicking) {
+          const p = Math.min(1, (nowt - soccer.kickStart) / 1500);
+          soccer.ball.position.lerpVectors(soccer.home, soccer.goal, p); soccer.ball.position.y = soccer.home.y + Math.sin(p * Math.PI) * 3.2; soccer.ball.rotation.x += dt * 14;
+          if (p >= 1) { soccer.kicking = false; state.invuln = false; state.lastKickKills = state.kills; metaRef.current.coins += 100; applyMeta({ ...metaRef.current }); showToast("⚽ GOAL! +100 🪙"); const s2 = soccer; window.setTimeout(() => { if (s2) { s2.ball.position.copy(s2.home); s2.ball.rotation.set(0, 0, 0); } }, 1400); }
+        }
         // medkit pickups
         for (const p of pickups) { if (p.active) { p.group.rotation.y += dt * 1.5; p.group.position.y = 0.9 + Math.sin(t * 2) * 0.12; if (state.hp < 100 && camera.position.distanceToSquared(p.pos) < 2.4) { state.hp = Math.min(100, state.hp + 30); p.active = false; p.group.visible = false; p.respawn = nowt + 18000; sfx("heal"); showToast("+30 HP"); syncHud(true); } } else if (nowt > p.respawn) { p.active = true; p.group.visible = true; } }
         for (let gi = grounds.length - 1; gi >= 0; gi--) { const gd = grounds[gi]; gd.group.rotation.y += dt * 1.6; gd.group.position.y = 0.6 + Math.sin(t * 2 + gi) * 0.1; if (camera.position.distanceToSquared(gd.pos) < 2.8) { const ok = gd.kind === "weapon" ? addWeapon(gd.id) : addHeal(gd.id); if (ok) { sfx("loot"); showToast(`Picked up ${gd.kind === "weapon" ? WEAPONS[gd.id].name : HEALS[gd.id].name}`); worldGrp.remove(gd.group); gd.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); grounds.splice(gi, 1); } } }
@@ -552,13 +577,13 @@ export default function Game() {
 
         if (!counting) {
           eye.copy(camera.position);
-          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)) * (1 - 0.4 * state.crouchAmt); if (Math.random() < hc) { let dmg = 6 + Math.random() * 6; if (state.shield > 0) { const ab = Math.min(state.shield, dmg); state.shield -= ab; dmg -= ab; syncPotions(); } state.hp -= dmg; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
+          for (let i = bots.length - 1; i >= 0; i--) { const b = bots[i]; if (b.dummy) continue; if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 6); b.group.position.y -= dt * 0.4; if (now() > (b.dieAt || 0)) removeBot(i); continue; } tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z); const dist = tmp.length(); tmp.normalize(); let canSee = dist < 75; if (canSee && playerHidden && dist > 5) canSee = false; if (canSee) { losRay.set(new THREE.Vector3(b.group.position.x, 1.6, b.group.position.z), new THREE.Vector3(eye.x - b.group.position.x, eye.y - 1.6, eye.z - b.group.position.z).normalize()); losRay.far = dist; const bl = losRay.intersectObjects(solids, false); if (bl.length && bl[0].distance < dist - 1) canSee = false; } if (canSee && dist < 62) { if (dist > 14) b.group.position.addScaledVector(tmp, b.speed * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); const legs = b.group.userData.legs as THREE.Mesh[]; if (legs) { legs[0].rotation.x = Math.sin(t * 8 + i) * 0.5; legs[1].rotation.x = -Math.sin(t * 8 + i) * 0.5; } if (nowt - b.lastShot > 900) { b.lastShot = nowt + Math.random() * 450; addTracer(new THREE.Vector3(b.group.position.x, 1.5, b.group.position.z), eye.clone(), 0xff5a3c); sfx("enemy"); const hc = Math.max(0.1, Math.min(0.66, 1 - dist / 68)) * (1 - 0.4 * state.crouchAmt); if (!state.invuln && Math.random() < hc) { let dmg = 6 + Math.random() * 6; if (state.shield > 0) { const ab = Math.min(state.shield, dmg); state.shield -= ab; dmg -= ab; syncPotions(); } state.hp -= dmg; setDmgFlash((v) => v + 1); syncHud(true); if (state.hp <= 0) { state.hp = 0; syncHud(true); die(); } } } } else { tmp.set(b.roam.x - b.group.position.x, 0, b.roam.z - b.group.position.z); if (tmp.length() < 2) b.roam = pickRoam(); else { tmp.normalize(); b.group.position.addScaledVector(tmp, b.speed * 0.55 * dt); b.group.rotation.y = Math.atan2(tmp.x, tmp.z); collide(b.group.position, 0.5); } } }
           if (state.mode === "training") for (const b of bots) { if (!b.dummy) continue;
             if (b.dead) { if (now() > (b.respawnAt || 0)) { b.dead = false; b.hp = 100; b.group.visible = true; b.group.rotation.set(0, 0, 0); if (b.home) b.group.position.copy(b.home); botParts.push(b.body, b.head); } continue; }
             if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 7); if (now() > (b.dieAt || 0)) { b.dying = false; b.dead = true; b.group.visible = false; b.respawnAt = now() + 3000; } continue; }
             tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z);
           }
-          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; const earned = 150 + state.kills * 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); controls.unlock(); setPhase("win"); }
+          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; const earned = 150; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(1); controls.unlock(); setPhase("win"); }
         }
 
         if (state.ads !== lastAds) { lastAds = state.ads; setAiming(state.ads); }
@@ -588,19 +613,25 @@ export default function Game() {
         mc.strokeStyle = "rgba(255,255,255,0.22)"; mc.lineWidth = 2; mc.beginPath(); mc.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2); mc.stroke();
       } }
 
-      // 3rd-person camera: offset behind player for render, restore after
-      let savedCam: THREE.Vector3 | null = null;
-      if (state.thirdPerson && controls.isLocked && state.alive) {
-        savedCam = camera.position.clone();
+      // camera modes: 0 first-person · 1 third-person behind · 2 front view (see your skin)
+      let savedCam: THREE.Vector3 | null = null; let savedQuat: THREE.Quaternion | null = null;
+      if (state.camMode > 0 && controls.isLocked && state.alive) {
+        savedCam = camera.position.clone(); savedQuat = camera.quaternion.clone();
         const dir = camera.getWorldDirection(new THREE.Vector3());
         const eyeH2 = 1.7 - state.crouchAmt * 0.75;
         playerModel.visible = true; gun.visible = false;
         playerModel.position.set(savedCam.x, savedCam.y - eyeH2, savedCam.z); playerModel.rotation.y = Math.atan2(dir.x, dir.z);
-        let dist = 4.2; losRay.set(savedCam, dir.clone().negate()); losRay.far = dist; const hb = losRay.intersectObjects(solids, false); if (hb.length) dist = Math.max(1.3, hb[0].distance - 0.4);
-        camera.position.addScaledVector(dir, -dist); camera.position.y += 0.55;
+        if (state.camMode === 1) {
+          let dist = 4.2; losRay.set(savedCam, dir.clone().negate()); losRay.far = dist; const hb = losRay.intersectObjects(solids, false); if (hb.length) dist = Math.max(1.3, hb[0].distance - 0.4);
+          camera.position.addScaledVector(dir, -dist); camera.position.y += 0.55;
+        } else {
+          let dist = 3.4; losRay.set(savedCam, dir.clone()); losRay.far = dist; const hb = losRay.intersectObjects(solids, false); if (hb.length) dist = Math.max(1.5, hb[0].distance - 0.4);
+          camera.position.addScaledVector(dir, dist); camera.position.y += 0.35;
+          camera.lookAt(savedCam.x, savedCam.y - 0.25, savedCam.z);
+        }
       } else { playerModel.visible = false; gun.visible = true; }
       composer.render();
-      if (savedCam) camera.position.copy(savedCam);
+      if (savedCam) camera.position.copy(savedCam); if (savedQuat) camera.quaternion.copy(savedQuat);
     };
     animate();
 
@@ -656,11 +687,13 @@ export default function Game() {
               {shieldHud > 0 && (<><div className="mb-1 flex justify-between text-xs"><span className="text-cyan-300">🛡 SHIELD</span><span>{shieldHud}</span></div><div className="mb-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full bg-cyan-400" style={{ width: `${shieldHud}%` }} /></div></>)}
               <div className="mb-1 flex justify-between text-xs"><span className={lowHp ? "text-red-400" : "text-emerald-300"}>HP</span><span>{hud.hp}</span></div>
               <div className="h-3 w-full overflow-hidden rounded-full bg-white/10"><div className={`h-full transition-all ${lowHp ? "bg-red-500" : "bg-emerald-400"}`} style={{ width: `${hud.hp}%` }} /></div>
-              <div className="mt-2 flex gap-1.5 text-[11px]">
-                <span className="rounded bg-white/10 px-1.5 py-0.5">8 ❤️{potionHud.health}</span>
-                <span className="rounded bg-white/10 px-1.5 py-0.5">9 🛡️{potionHud.shield}</span>
-                <span className="rounded bg-white/10 px-1.5 py-0.5">0 ⚡{potionHud.speed}</span>
-                <span className="rounded bg-white/10 px-1.5 py-0.5 opacity-70">TAB view</span>
+              <div className="mt-2.5 space-y-1 text-[11px]">
+                <div className="font-bold uppercase tracking-wider text-white/40">Potions</div>
+                <div className="flex gap-1.5">
+                  <span className="rounded bg-white/10 px-2 py-1"><b className="text-cyan-300">8</b> ❤️ ×{potionHud.health}</span>
+                  <span className="rounded bg-white/10 px-2 py-1"><b className="text-cyan-300">9</b> 🛡️ ×{potionHud.shield}</span>
+                  <span className="rounded bg-white/10 px-2 py-1"><b className="text-cyan-300">0</b> ⚡ ×{potionHud.speed}</span>
+                </div>
               </div>
             </div>
             <div className="text-right"><div className="text-3xl font-bold tabular-nums">{hud.reloading ? <span className="text-xl text-yellow-300">RELOADING…</span> : <>{hud.ammo}<span className={`text-base ${hud.reserve <= 0 ? "text-red-400" : "opacity-50"}`}> / {hud.reserve} spare</span></>}</div><div className="text-xs opacity-60">🔫 {hud.wname} <span className="opacity-50">(R reload · RMB aim)</span></div></div>
@@ -670,9 +703,9 @@ export default function Game() {
 
       {phase === "menu" && (
         <Overlay>
-          <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.07] to-transparent p-6 text-center shadow-2xl sm:p-8">
+          <div className="w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.08] to-transparent p-8 text-center shadow-2xl sm:p-12">
             <Title />
-            <p className="mt-1 text-[11px] font-bold tracking-[0.5em] text-cyan-300/70">3D BROWSER FPS</p>
+            <p className="mt-2 text-sm font-bold tracking-[0.5em] text-cyan-300/70">3D BROWSER FPS</p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
               <span className="rounded-full bg-yellow-400/15 px-3 py-1.5 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
               <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button>
@@ -682,7 +715,7 @@ export default function Game() {
             <div className="mt-2 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
             <p className="mt-5 text-[11px] uppercase tracking-[0.3em] text-white/40">Map</p>
             <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-40 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
-            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-7 w-full rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 py-4 text-2xl font-black tracking-wider text-black transition hover:scale-[1.02] hover:brightness-110" style={{ boxShadow: "0 0 45px -6px rgba(0,200,255,0.75)" }}>▶ PLAY</button>
+            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-8 w-full rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 py-5 text-4xl font-black tracking-wider text-black transition hover:scale-[1.02] hover:brightness-110" style={{ boxShadow: "0 0 55px -6px rgba(0,200,255,0.85)" }}>▶ PLAY</button>
             <p className="mt-2 text-[11px] text-white/40">Click Play, then move your mouse to look around</p>
           </div>
         </Overlay>
@@ -719,7 +752,7 @@ export default function Game() {
               <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(SKINS).map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
                   <div key={id} className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>
-                    <div className="mx-auto grid h-16 w-16 place-items-center rounded-full text-3xl" style={{ background: `#${s.color.toString(16).padStart(6, "0")}`, boxShadow: `0 0 20px -4px ${col}` }}>{s.icon}</div>
+                    <div className="mx-auto grid place-items-center rounded-xl py-2" style={{ boxShadow: `0 0 20px -6px ${col}` }}><SkinAvatar s={s} /></div>
                     <div className="mt-2 font-bold text-sm">{s.name}</div>
                     <div className="text-[10px] uppercase" style={{ color: col }}>{s.rarity}</div>
                     {equipped ? <div className="mt-2 rounded-lg bg-emerald-500/20 py-1.5 text-xs font-bold text-emerald-300">EQUIPPED</div>
@@ -784,7 +817,7 @@ export default function Game() {
       {phase === "multiplayer" && (<Overlay><h2 className="text-3xl font-bold tracking-widest text-cyan-300">🌐 ONLINE MULTIPLAYER</h2><p className="mt-4 max-w-md text-center text-sm text-white/70">Real-time online play needs a dedicated game server (WebSockets + netcode) that Vercel can&apos;t host. It&apos;s <span className="text-yellow-300">coming soon</span> — needs a separate realtime backend (Colyseus/Socket.IO on Railway/Fly.io).</p><PlayButton label="← Back" onClick={() => setPhase("menu")} /></Overlay>)}
       {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
       {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
-      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-3 text-lg">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
+      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-2 text-2xl font-bold">#{place} <span className="text-base font-normal text-white/60">place</span></p><p className="mt-2 text-lg">{hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-3 text-sm text-white/50 hover:text-white">Main menu</button></Overlay>)}
 
       {showControls && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowControls(false)}>
@@ -800,7 +833,22 @@ export default function Game() {
 }
 
 function Overlay({ children }: { children: React.ReactNode }) { return <div className="fade-in absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70 px-4 backdrop-blur-sm">{children}</div>; }
-function Title() { return <h1 className="text-center text-5xl font-black tracking-[0.2em] sm:text-7xl"><span className="text-cyan-300">STRIKE</span><span className="text-red-500">ZONE</span></h1>; }
+function SkinAvatar({ s }: { s: Skin }) {
+  const body = `#${s.color.toString(16).padStart(6, "0")}`;
+  const accent = `#${(s.accent ?? 0xffffff).toString(16).padStart(6, "0")}`;
+  return (
+    <div className="relative mx-auto h-20 w-16">
+      {s.acc === "crown" && <div className="absolute left-1/2 top-1 flex -translate-x-1/2 gap-0.5">{[0, 1, 2].map((i) => <div key={i} className="h-0 w-0 border-x-[5px] border-b-[9px] border-x-transparent" style={{ borderBottomColor: accent }} />)}</div>}
+      {s.acc === "horns" && <><div className="absolute left-2 top-2 h-0 w-0 -rotate-[30deg] border-x-[4px] border-b-[10px] border-x-transparent" style={{ borderBottomColor: accent }} /><div className="absolute right-2 top-2 h-0 w-0 rotate-[30deg] border-x-[4px] border-b-[10px] border-x-transparent" style={{ borderBottomColor: accent }} /></>}
+      {s.acc === "hood" && <div className="absolute left-1/2 top-2 h-8 w-11 -translate-x-1/2 rounded-t-full" style={{ background: "#0a0a0c" }} />}
+      <div className="absolute left-1/2 top-4 h-7 w-7 -translate-x-1/2 rounded-md" style={{ background: "#c98d63" }}>
+        {s.acc === "visor" && <div className="absolute left-1/2 top-3 h-1.5 w-6 -translate-x-1/2 rounded" style={{ background: accent, boxShadow: `0 0 8px ${accent}` }} />}
+      </div>
+      <div className="absolute bottom-0 left-1/2 h-9 w-11 -translate-x-1/2 rounded-t-lg" style={{ background: body, boxShadow: s.emissive ? `0 0 14px ${accent}` : "none" }} />
+    </div>
+  );
+}
+function Title() { return <h1 className="text-center text-6xl font-black tracking-[0.2em] sm:text-8xl" style={{ textShadow: "0 0 40px rgba(0,200,255,0.4)" }}><span className="text-cyan-300">STRIKE</span><span className="text-red-500">ZONE</span></h1>; }
 function ModeCard({ active, onClick, icon, title, desc, soon }: { active: boolean; onClick: () => void; icon: string; title: string; desc: string; soon?: boolean }) { return (<button onClick={onClick} className={`relative w-44 rounded-xl border p-4 text-left transition ${active ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}>{soon && <span className="absolute right-2 top-2 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300">SOON</span>}<div className="text-3xl">{icon}</div><div className="mt-2 font-bold">{title}</div><div className="text-[11px] text-white/55">{desc}</div></button>); }
 function PlayButton({ label, onClick }: { label: string; onClick: () => void }) { return <button onClick={onClick} className="mt-7 rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-8 py-3.5 text-lg font-bold text-black transition hover:scale-105 hover:brightness-110">{label}</button>; }
 function Controls() { const rows = [["WASD", "Move"], ["Mouse", "Look"], ["LMB", "Shoot"], ["RMB", "Aim"], ["C / Ctrl", "Crouch"], ["Space", "Jump"], ["Shift", "Sprint"], ["1-7", "Weapons/items"], ["8 / 9 / 0", "Potions"], ["Scroll", "Swap gun"], ["E", "Open chest"], ["R", "Reload"], ["TAB", "1st/3rd view"]]; return (<div className="mt-7 grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-4">{rows.map(([k, v]) => (<div key={k} className="flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-0.5 font-bold text-cyan-200">{k}</span><span className="text-white/60">{v}</span></div>))}</div>); }
