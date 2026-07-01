@@ -12,7 +12,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; };
+type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; };
 
 const ARENA = 110;
 const MAPS = [
@@ -583,6 +583,9 @@ export default function Game() {
       kick: () => tryKick(),
       cam: () => { state.camMode = (state.camMode + 1) % 3; },
       pause: () => { state.mouseDown = false; setPhase("paused"); },
+      swap: () => cycleW(1),
+      slot: (i) => useSlot(i),
+      sprintHold: (v) => { keys[settingsRef.current.binds.sprint] = v; },
     };
     const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(placement); controls.unlock(); setPhase("dead"); };
     const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
@@ -627,6 +630,10 @@ export default function Game() {
         camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12); camera.updateProjectionMatrix();
         gun.position.x += (((state.ads ? 0.0 : 0.3)) - gun.position.x) * Math.min(1, dt * 12); gun.position.y += (((state.ads ? -0.14 : -0.26)) - gun.position.y) * Math.min(1, dt * 12);
         gun.position.z += (-0.55 - gun.position.z) * Math.min(1, dt * 13); gun.rotation.x += (0 - gun.rotation.x) * Math.min(1, dt * 13);
+        // weapon sway / bob while moving (realism)
+        const moveMag = Math.min(1, Math.hypot(state.vel.x, state.vel.z) / 6);
+        gun.position.y += Math.sin(t * 11) * 0.012 * moveMag * (state.ads ? 0.25 : 1);
+        gun.position.x += Math.cos(t * 5.5) * 0.009 * moveMag * (state.ads ? 0.25 : 1);
 
         if (!counting && state.mouseDown && w.auto && nowt - state.lastShot >= w.rate) shoot();
 
@@ -732,7 +739,7 @@ export default function Game() {
           {count > 0 && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="text-8xl font-black text-cyan-300 hud-shadow" style={{ textShadow: "0 0 30px rgba(0,200,255,0.7)" }}>{count}</div></div>}
           {/* soccer goal celebration */}
           {goalShow && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><div className="reward-pop text-center"><div className="text-8xl">⚽🎉</div><div className="text-7xl font-black text-yellow-300" style={{ textShadow: "0 0 40px rgba(255,200,40,0.9)" }}>GOOOOAL!</div><div className="mt-2 text-3xl font-bold text-white">+100 🪙</div><div className="mt-1 text-sm text-white/60">🛡️ invincible…</div></div></div>}
-          {isTouch && <TouchControls apiRef={apiRef} potions={potionHud} />}
+          {isTouch && <TouchControls apiRef={apiRef} potions={potionHud} inv={inv} equip={equip} />}
 
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: settings.crosshair }}>
             {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
@@ -987,7 +994,7 @@ export default function Game() {
   );
 }
 
-function TouchControls({ apiRef, potions }: { apiRef: React.MutableRefObject<GameApi | null>; potions: { health: number; shield: number; speed: number } }) {
+function TouchControls({ apiRef, potions, inv, equip }: { apiRef: React.MutableRefObject<GameApi | null>; potions: { health: number; shield: number; speed: number }; inv: Slot[]; equip: number }) {
   const api = () => apiRef.current;
   const joyId = useRef<number | null>(null); const joyBase = useRef<{ x: number; y: number } | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -1014,6 +1021,16 @@ function TouchControls({ apiRef, potions }: { apiRef: React.MutableRefObject<Gam
       <button className={`${b} absolute right-4 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.pause(); }}>⏸️</button>
       <button className={`${b} absolute right-16 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.cam(); }}>👁️</button>
       <button className={`${b} absolute right-28 top-4 h-11 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.kick(); }}>⚽</button>
+      <button className={`${b} absolute bottom-40 right-32 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.swap(); }}>🔀</button>
+      <button className={`${b} absolute bottom-44 left-6 h-12 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.sprintHold(true); }} onPointerUp={() => api()?.sprintHold(false)} onPointerCancel={() => api()?.sprintHold(false)}>🏃</button>
+      {/* tappable inventory strip — change weapon / use items */}
+      <div className="absolute left-1/2 top-3 flex -translate-x-1/2 gap-1">
+        {inv.map((s, i) => { const r: Rarity = s.type === "weapon" ? WEAPONS[s.wId!].rarity : s.type === "heal" ? HEALS[s.hId!].rarity : "common"; return (
+          <button key={i} onPointerDown={(e) => { stop(e); api()?.slot(i); }} className={`relative h-10 w-10 rounded-md border-2 text-[10px] font-bold text-white ${equip === i && s.type === "weapon" ? "ring-2 ring-white" : ""}`} style={{ borderColor: s.type === "empty" ? "rgba(255,255,255,0.15)" : RARITY[r].c, background: "rgba(0,0,0,0.55)" }}>
+            <span className="flex h-full w-full items-center justify-center">{s.type === "weapon" ? WEAPONS[s.wId!].abbr : s.type === "heal" ? HEALS[s.hId!].icon : i + 1}</span>
+            {s.type === "heal" && <span className="absolute bottom-0 right-0.5 text-[9px]">{s.count}</span>}
+          </button>); })}
+      </div>
       <div className="absolute bottom-3 left-3 flex gap-2">
         <button className={`${b} h-11 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.potion("health"); }}>❤️{potions.health}</button>
         <button className={`${b} h-11 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.potion("shield"); }}>🛡️{potions.shield}</button>
