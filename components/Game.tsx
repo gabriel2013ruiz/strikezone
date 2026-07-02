@@ -52,23 +52,24 @@ const GUNSPEC: Record<string, GunSpec> = {
 // ---- meta / shop data ----
 type Acc = "none" | "horns" | "crown" | "visor" | "hood";
 interface Skin { name: string; color: number; price: number; rarity: Rarity; crateOnly?: boolean; accent?: number; metal?: number; emissive?: number; acc?: Acc; icon: string; limited?: boolean; }
+// The real 48 qualified nations for the 2026 FIFA World Cup (hosts USA/Canada/Mexico)
 const TEAMS: { id: string; name: string; flag: string; color: number }[] = [
   { id: "usa", name: "USA", flag: "🇺🇸", color: 0x1a3a6b }, { id: "can", name: "Canada", flag: "🇨🇦", color: 0xd52b1e }, { id: "mex", name: "Mexico", flag: "🇲🇽", color: 0x006847 },
-  { id: "bra", name: "Brazil", flag: "🇧🇷", color: 0x009c3b }, { id: "arg", name: "Argentina", flag: "🇦🇷", color: 0x6cace4 }, { id: "uru", name: "Uruguay", flag: "🇺🇾", color: 0x5cbcf0 },
+  { id: "bra", name: "Brazil", flag: "🇧🇷", color: 0x009c3b }, { id: "arg", name: "Argentina", flag: "🇦🇷", color: 0x75aadb }, { id: "uru", name: "Uruguay", flag: "🇺🇾", color: 0x5cbcf0 },
   { id: "col", name: "Colombia", flag: "🇨🇴", color: 0xfcd116 }, { id: "ecu", name: "Ecuador", flag: "🇪🇨", color: 0xffd100 }, { id: "par", name: "Paraguay", flag: "🇵🇾", color: 0xda291c },
-  { id: "fra", name: "France", flag: "🇫🇷", color: 0x0055a4 }, { id: "eng", name: "England", flag: "🏴", color: 0xffffff }, { id: "esp", name: "Spain", flag: "🇪🇸", color: 0xc60b1e },
-  { id: "ger", name: "Germany", flag: "🇩🇪", color: 0x222222 }, { id: "por", name: "Portugal", flag: "🇵🇹", color: 0x006600 }, { id: "ned", name: "Netherlands", flag: "🇳🇱", color: 0xff6a00 },
-  { id: "ita", name: "Italy", flag: "🇮🇹", color: 0x0066b3 }, { id: "bel", name: "Belgium", flag: "🇧🇪", color: 0xe30613 }, { id: "cro", name: "Croatia", flag: "🇭🇷", color: 0xd81e2c },
-  { id: "sui", name: "Switzerland", flag: "🇨🇭", color: 0xd52b1e }, { id: "den", name: "Denmark", flag: "🇩🇰", color: 0xc60c30 }, { id: "pol", name: "Poland", flag: "🇵🇱", color: 0xdc143c },
-  { id: "aut", name: "Austria", flag: "🇦🇹", color: 0xed2939 }, { id: "ukr", name: "Ukraine", flag: "🇺🇦", color: 0x005bbb }, { id: "srb", name: "Serbia", flag: "🇷🇸", color: 0xc6363c },
-  { id: "tur", name: "Türkiye", flag: "🇹🇷", color: 0xe30a17 }, { id: "nor", name: "Norway", flag: "🇳🇴", color: 0xef2b2d }, { id: "swe", name: "Sweden", flag: "🇸🇪", color: 0xfecc00 },
-  { id: "mar", name: "Morocco", flag: "🇲🇦", color: 0xc1272d }, { id: "sen", name: "Senegal", flag: "🇸🇳", color: 0x00853f }, { id: "nga", name: "Nigeria", flag: "🇳🇬", color: 0x008751 },
-  { id: "egy", name: "Egypt", flag: "🇪🇬", color: 0xce1126 }, { id: "gha", name: "Ghana", flag: "🇬🇭", color: 0x006b3f }, { id: "cmr", name: "Cameroon", flag: "🇨🇲", color: 0x007a5e },
-  { id: "alg", name: "Algeria", flag: "🇩🇿", color: 0x006233 }, { id: "civ", name: "Ivory Coast", flag: "🇨🇮", color: 0xf77f00 }, { id: "tun", name: "Tunisia", flag: "🇹🇳", color: 0xe70013 },
-  { id: "jpn", name: "Japan", flag: "🇯🇵", color: 0xbc002d }, { id: "kor", name: "South Korea", flag: "🇰🇷", color: 0xcd2e3a }, { id: "irn", name: "Iran", flag: "🇮🇷", color: 0x239f40 },
-  { id: "ksa", name: "Saudi Arabia", flag: "🇸🇦", color: 0x006c35 }, { id: "aus", name: "Australia", flag: "🇦🇺", color: 0x00843d }, { id: "qat", name: "Qatar", flag: "🇶🇦", color: 0x8a1538 },
-  { id: "irq", name: "Iraq", flag: "🇮🇶", color: 0xce1126 }, { id: "uzb", name: "Uzbekistan", flag: "🇺🇿", color: 0x1eb53a }, { id: "crc", name: "Costa Rica", flag: "🇨🇷", color: 0x002b7f },
-  { id: "jam", name: "Jamaica", flag: "🇯🇲", color: 0x009b3a }, { id: "pan", name: "Panama", flag: "🇵🇦", color: 0xda121a }, { id: "nzl", name: "New Zealand", flag: "🇳🇿", color: 0x1a1a1a },
+  { id: "fra", name: "France", flag: "🇫🇷", color: 0x0055a4 }, { id: "eng", name: "England", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", color: 0xffffff }, { id: "esp", name: "Spain", flag: "🇪🇸", color: 0xc60b1e },
+  { id: "ger", name: "Germany", flag: "🇩🇪", color: 0x2b2b2b }, { id: "por", name: "Portugal", flag: "🇵🇹", color: 0x006600 }, { id: "ned", name: "Netherlands", flag: "🇳🇱", color: 0xff6a00 },
+  { id: "bel", name: "Belgium", flag: "🇧🇪", color: 0xe30613 }, { id: "cro", name: "Croatia", flag: "🇭🇷", color: 0xd81e2c }, { id: "sui", name: "Switzerland", flag: "🇨🇭", color: 0xd52b1e },
+  { id: "aut", name: "Austria", flag: "🇦🇹", color: 0xed2939 }, { id: "nor", name: "Norway", flag: "🇳🇴", color: 0xef2b2d }, { id: "swe", name: "Sweden", flag: "🇸🇪", color: 0xfecc00 },
+  { id: "tur", name: "Türkiye", flag: "🇹🇷", color: 0xe30a17 }, { id: "sco", name: "Scotland", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", color: 0x0065bf }, { id: "cze", name: "Czechia", flag: "🇨🇿", color: 0xd7141a },
+  { id: "bih", name: "Bosnia & H.", flag: "🇧🇦", color: 0x1f4ea1 }, { id: "jpn", name: "Japan", flag: "🇯🇵", color: 0x223a7a }, { id: "kor", name: "South Korea", flag: "🇰🇷", color: 0xcd2e3a },
+  { id: "irn", name: "Iran", flag: "🇮🇷", color: 0x239f40 }, { id: "ksa", name: "Saudi Arabia", flag: "🇸🇦", color: 0x006c35 }, { id: "aus", name: "Australia", flag: "🇦🇺", color: 0x00843d },
+  { id: "qat", name: "Qatar", flag: "🇶🇦", color: 0x8a1538 }, { id: "irq", name: "Iraq", flag: "🇮🇶", color: 0xce1126 }, { id: "uzb", name: "Uzbekistan", flag: "🇺🇿", color: 0x1eb53a },
+  { id: "jor", name: "Jordan", flag: "🇯🇴", color: 0x007a3d }, { id: "mar", name: "Morocco", flag: "🇲🇦", color: 0xc1272d }, { id: "sen", name: "Senegal", flag: "🇸🇳", color: 0x00853f },
+  { id: "alg", name: "Algeria", flag: "🇩🇿", color: 0x006233 }, { id: "cpv", name: "Cabo Verde", flag: "🇨🇻", color: 0x003893 }, { id: "cod", name: "DR Congo", flag: "🇨🇩", color: 0x2d9bf0 },
+  { id: "civ", name: "Côte d'Ivoire", flag: "🇨🇮", color: 0xf77f00 }, { id: "egy", name: "Egypt", flag: "🇪🇬", color: 0xce1126 }, { id: "gha", name: "Ghana", flag: "🇬🇭", color: 0x006b3f },
+  { id: "rsa", name: "South Africa", flag: "🇿🇦", color: 0x007749 }, { id: "tun", name: "Tunisia", flag: "🇹🇳", color: 0xe70013 }, { id: "cur", name: "Curaçao", flag: "🇨🇼", color: 0x0038a8 },
+  { id: "hai", name: "Haiti", flag: "🇭🇹", color: 0x00209f }, { id: "pan", name: "Panama", flag: "🇵🇦", color: 0xda121a }, { id: "nzl", name: "New Zealand", flag: "🇳🇿", color: 0x1a1a1a },
 ];
 const SKINS: Record<string, Skin> = {
   ranger: { name: "Ranger", color: 0x4b5320, price: 0, rarity: "common", accent: 0x2f3a2a, acc: "none", icon: "🪖" },
@@ -674,10 +675,11 @@ export default function Game() {
 
         for (const bz of bushZones) { if ((camera.position.x - bz.x) ** 2 + (camera.position.z - bz.z) ** 2 < bz.r * bz.r) { playerHidden = true; break; } }
         // interact prompt (chests + doors + soccer)
-        let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; }
-        if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.4) { pr = dr.open ? "close door" : "open door"; break; }
-        if (!pr) for (const g of grounds) if (g.kind === "weapon" && g.pos.distanceTo(camera.position) < 3.0) { pr = "swap weapon"; break; }
-        if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? "kick the ball ⚽ (F)" : `kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
+        const kb = settingsRef.current.binds;
+        let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = state.touch ? "✋ USE → open chest" : `Press ${keyLabel(kb.interact)} to open chest`; break; }
+        if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.4) { pr = state.touch ? `✋ USE → ${dr.open ? "close" : "open"} door` : `Press ${keyLabel(kb.interact)} to ${dr.open ? "close" : "open"} door`; break; }
+        if (!pr) for (const g of grounds) if (g.kind === "weapon" && g.pos.distanceTo(camera.position) < 3.0) { pr = state.touch ? "⇄ swap weapon" : `Press ${keyLabel(kb.swap)} to swap weapon`; break; }
+        if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? (state.touch ? "⚽ kick the ball" : `Press ${keyLabel(kb.kick)} to kick the ball ⚽`) : `Kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // soccer kick animation (invulnerable while it plays)
         if (soccer?.kicking) {
@@ -795,7 +797,7 @@ export default function Game() {
             {hidden && <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-bold text-green-300 hud-shadow">🌿 HIDDEN</div>}
             {crouched && <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-cyan-200 hud-shadow">🡇 CROUCH</div>}
           </div>
-          {prompt && <div className="pointer-events-none absolute left-1/2 top-1/2 mt-10 -translate-x-1/2 rounded bg-black/50 px-3 py-1 text-xs font-bold hud-shadow">Press <span className="text-cyan-300">E</span> to {prompt}</div>}
+          {prompt && <div className="pointer-events-none absolute left-1/2 top-1/2 mt-10 -translate-x-1/2 rounded bg-black/50 px-3 py-1 text-xs font-bold text-cyan-100 hud-shadow">{prompt}</div>}
           {toast && <div className="pointer-events-none absolute left-1/2 top-28 -translate-x-1/2 rounded-full bg-cyan-500/25 px-4 py-1.5 text-sm font-bold text-cyan-100 hud-shadow">{toast}</div>}
 
           {/* inventory bar */}
