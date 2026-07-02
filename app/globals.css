@@ -50,3 +50,31 @@ canvas { display: block; }
   100% { transform: translateY(0); opacity: 1; }
 }
 .float-up { animation: floatUp 0.5s ease 0.2s both; }
+
+/* animated main-menu backdrop */
+@keyframes menuGlow {
+  0%, 100% { transform: translate(-6%, -4%) scale(1.05); }
+  50% { transform: translate(6%, 4%) scale(1.15); }
+}
+.menu-glow { animation: menuGlow 14s ease-in-out infinite; }
+@keyframes gridDrift { to { background-position: 0 60px, 60px 0; } }
+.menu-grid {
+  background-image:
+    linear-gradient(rgba(0,200,255,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,200,255,0.08) 1px, transparent 1px);
+  background-size: 60px 60px, 60px 60px;
+  animation: gridDrift 6s linear infinite;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 80%);
+}
+@keyframes titlePulse {
+  0%, 100% { text-shadow: 0 0 40px rgba(0,200,255,0.35); }
+  50% { text-shadow: 0 0 70px rgba(0,200,255,0.7), 0 0 30px rgba(255,40,80,0.4); }
+}
+.title-pulse { animation: titlePulse 3.5s ease-in-out infinite; }
+@keyframes sheen { to { background-position: 200% center; } }
+.btn-sheen {
+  background-image: linear-gradient(110deg, #22d3ee 0%, #3b82f6 40%, #a855f7 55%, #3b82f6 70%, #22d3ee 100%);
+  background-size: 200% auto;
+  animation: sheen 4s linear infinite;
+}

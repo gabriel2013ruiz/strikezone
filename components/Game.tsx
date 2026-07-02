@@ -9,7 +9,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
-type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
+type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings" | "bp";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; cycle: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; interact: () => void; };
@@ -20,6 +20,8 @@ const MAPS = [
   { name: "Harbor", desc: "Docks, sea, towers & crates" },
   { name: "Dust Town", desc: "Desert village, houses & towers" },
   { name: "Lakeside Villas", desc: "Houses, pools & gardens" },
+  { name: "Snowfall Peak", desc: "Snowy village & frozen lake" },
+  { name: "Neon City", desc: "Night streets, towers & glow" },
 ];
 
 interface Weapon { name: string; abbr: string; dmg: number; rate: number; mag: number; auto: boolean; fov: number; spread: number; pellets: number; rarity: Rarity; }
@@ -91,8 +93,32 @@ const CRATES: Record<Rarity, { name: string; price: number }> = {
   rare: { name: "Rare Crate", price: 350 }, epic: { name: "Epic Crate", price: 700 }, legendary: { name: "Legendary Crate", price: 1500 },
 };
 const COIN_PACKS = [{ coins: 500, price: "$4.99" }, { coins: 1200, price: "$9.99" }, { coins: 3000, price: "$19.99" }, { coins: 7000, price: "$39.99" }];
-interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]; potions: Record<string, number>; team: string; }
-const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 }, team: "" });
+interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]; potions: Record<string, number>; team: string; xp: number; bp: boolean; bpFree: number; bpPrem: number; }
+const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 }, team: "", xp: 0, bp: false, bpFree: 0, bpPrem: 0 });
+const XP_PER = 1000; // xp per battle-pass tier
+const bpTier = (xp: number) => Math.min(100, Math.floor(xp / XP_PER));
+type BpRew = { kind: "coins" | "potion" | "skin" | "weapon"; id?: string; amount?: number; label: string; icon: string };
+const BP_SKIN_TIERS: Record<number, string> = { 15: "crimson", 30: "frost", 55: "golden", 80: "shadow", 100: "worldcup" };
+const BP_WEAPON_TIERS: Record<number, string> = { 40: "railgun", 70: "goldak" };
+const BP_PREM: BpRew[] = Array.from({ length: 100 }, (_, i) => { const t = i + 1;
+  if (BP_SKIN_TIERS[t]) return { kind: "skin", id: BP_SKIN_TIERS[t], label: "Skin", icon: "🎨" };
+  if (BP_WEAPON_TIERS[t]) return { kind: "weapon", id: BP_WEAPON_TIERS[t], label: "Mythic", icon: "🔫" };
+  if (t % 10 === 0) return { kind: "coins", amount: 300, label: "300", icon: "🪙" };
+  if (t % 3 === 0) return { kind: "potion", id: ["health", "shield", "speed"][t % 3], label: "Potion", icon: "🧪" };
+  return { kind: "coins", amount: 120, label: "120", icon: "🪙" };
+});
+const BP_FREE: (BpRew | null)[] = Array.from({ length: 100 }, (_, i) => { const t = i + 1;
+  if (t % 25 === 0) return { kind: "potion", id: "shield", label: "Shield", icon: "🛡️" };
+  if (t % 10 === 0) return { kind: "coins", amount: 150, label: "150", icon: "🪙" };
+  if (t % 5 === 0) return { kind: "potion", id: ["health", "shield", "speed"][t % 3], label: "Potion", icon: "🧪" };
+  return null;
+});
+function grantBp(m: Meta, r: BpRew) {
+  if (r.kind === "coins") m.coins += r.amount || 0;
+  else if (r.kind === "potion") m.potions[r.id!] = (m.potions[r.id!] || 0) + 1;
+  else if (r.kind === "skin") { if (!m.skins.includes(r.id!)) m.skins.push(r.id!); }
+  else if (r.kind === "weapon") { if (!m.weapons.includes(r.id!)) m.weapons.push(r.id!); }
+}
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
 interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; gunbob: boolean; crosshair: string; crossSize: number; binds: Record<string, string>; }
@@ -137,7 +163,7 @@ export default function Game() {
   const [meta, setMeta] = useState<Meta>(defaultMeta);
   const [shopTab, setShopTab] = useState<"crates" | "skins" | "potions" | "coins">("crates");
   const [crateReveal, setCrateReveal] = useState<{ label: string; rarity: Rarity } | null>(null);
-  const [winCoins, setWinCoins] = useState(0); const [place, setPlace] = useState(0);
+  const [winCoins, setWinCoins] = useState(0); const [place, setPlace] = useState(0); const [matchXpShow, setMatchXpShow] = useState(0);
   const [potionHud, setPotionHud] = useState({ health: 0, shield: 0, speed: 0 });
   const [shieldHud, setShieldHud] = useState(0);
   const [showControls, setShowControls] = useState(false);
@@ -156,6 +182,7 @@ export default function Game() {
   const equipSkin = (id: string) => { if (!meta.skins.includes(id)) return; applyMeta({ ...meta, skin: id }); };
   const buyPotion = (id: string) => { const p = POTIONS[id]; if (!p || meta.coins < p.price) return; applyMeta({ ...meta, coins: meta.coins - p.price, potions: { ...meta.potions, [id]: (meta.potions[id] || 0) + 1 } }); };
   const buyCoins = (amt: number) => applyMeta({ ...meta, coins: meta.coins + amt });
+  const buyBp = () => { if (meta.bp) return; const m: Meta = { ...meta, bp: true, skins: [...meta.skins], weapons: [...meta.weapons], potions: { ...meta.potions } }; const tier = bpTier(m.xp); for (let t = 1; t <= tier; t++) grantBp(m, BP_PREM[t - 1]); m.bpPrem = tier; applyMeta(m); };
   const openCrate = (crate: Rarity) => {
     if (crateOpening) return; const c = CRATES[crate]; if (meta.coins < c.price) return;
     applyMeta({ ...meta, coins: meta.coins - c.price }); setCrateOpening(crate);
@@ -354,6 +381,8 @@ export default function Game() {
         { g: ["#454c55", "#3a4049"], sky: ["#6b7f9e", "#c2cedd"], bld: "#5d6470" },
         { g: ["#a98b5b", "#8f7148"], sky: ["#d8c79b", "#efe6cf"], bld: "#c2a878" },
         { g: ["#4a6b3a", "#3e5b31"], sky: ["#79a7d6", "#dfeaf4"], bld: "#9aa3ad" },
+        { g: ["#dfe7ef", "#c4d0dc"], sky: ["#aebfd2", "#eaf1f8"], bld: "#8f9aa8" },
+        { g: ["#1a1b24", "#111119"], sky: ["#241a3a", "#3a2a5a"], bld: "#3a3550" },
       ][idx];
       const rand = (a: number, b: number) => a + Math.random() * (b - a);
       const ring = (r: number, n: number, cb: (x: number, z: number, i: number) => void) => { for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.18, 0.18); cb(Math.cos(a) * r, Math.sin(a) * r, i); } };
@@ -384,12 +413,25 @@ export default function Game() {
         ring(78, 11, (x, z) => house(x, z, rand(6, 9), rand(6, 9), P.bld));
         for (let i = 0; i < 55; i++) makeCrate(rand(-75, 75), rand(-75, 75), rand(1.2, 2.4));
         for (let i = 0; i < 24; i++) makeBush(rand(-75, 75), rand(-75, 75), Math.random() > 0.6);
-      } else {
+      } else if (idx === 3) {
         makeWater(-46, 40, 50, 40);
         ring(30, 7, (x, z, i) => { house(x, z, rand(8, 11), rand(8, 11), P.bld); if (i % 2 === 0) makeWater(x * 1.4, z * 1.4, rand(6, 9), rand(5, 8)); });
         ring(60, 8, (x, z) => tower(x, z, rand(9, 12), rand(9, 12), P.bld));
         for (let i = 0; i < 60; i++) makeTree(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6));
         for (let i = 0; i < 55; i++) makeBush(rand(-ARENA + 6, ARENA - 6), rand(-ARENA + 6, ARENA - 6), Math.random() > 0.4);
+      } else if (idx === 4) {
+        makeWater(38, -36, 56, 46); // frozen lake
+        ring(42, 6, (x, z) => house(x, z, rand(7, 10), rand(7, 10), P.bld));
+        ring(68, 7, (x, z) => tower(x, z, rand(9, 12), rand(9, 12), P.bld));
+        for (let i = 0; i < 70; i++) { const x = rand(-ARENA + 6, ARENA - 6), z = rand(-ARENA + 6, ARENA - 6); if (Math.hypot(x - 38, z + 36) > 30 && clearOf(x, z)) makeTree(x, z); }
+        for (let i = 0; i < 40; i++) { const rr = 0.5 + Math.random() * 1; const s = new THREE.Mesh(new THREE.IcosahedronGeometry(rr, 0), new THREE.MeshStandardMaterial({ color: 0xf2f6fb, roughness: 1, flatShading: true })); s.position.set(rand(-ARENA + 6, ARENA - 6), rr * 0.4, rand(-ARENA + 6, ARENA - 6)); addSolid(s, true); }
+      } else {
+        ring(26, 7, (x, z) => house(x, z, rand(8, 11), rand(9, 13), P.bld));
+        ring(52, 9, (x, z) => tower(x, z, rand(10, 14), rand(11, 16), P.bld));
+        ring(80, 10, (x, z) => house(x, z, rand(7, 10), rand(8, 12), P.bld));
+        for (let i = 0; i < 50; i++) makeCrate(rand(-75, 75), rand(-75, 75), rand(1.4, 2.8));
+        // neon glow posts
+        for (let i = 0; i < 30; i++) { const col = [0x00e5ff, 0xff2fd0, 0x9d4bff, 0x2fff8a][(i) % 4]; const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 4.5, 8), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 2.2 })); post.position.set(rand(-ARENA + 8, ARENA - 8), 2.25, rand(-ARENA + 8, ARENA - 8)); if (Math.hypot(post.position.x, post.position.z) < 11) continue; scene.add(post); const gl = new THREE.PointLight(col, 8, 18); gl.position.copy(post.position); gl.position.y = 4.4; scene.add(gl); }
       }
 
       // outdoor props (rocks & barrels) for cover + realism
@@ -500,7 +542,7 @@ export default function Game() {
 
     /* ---------- state + inventory ---------- */
     const controls = new PointerLockControls(camera, renderer.domElement);
-    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, camMode: 0, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, invuln: false, lastKickKills: 0, moveX: 0, moveZ: 0, yaw: 0, pitch: 0, touch: false, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
+    const state = { hp: 100, shield: 0, score: 0, kills: 0, shots: 0, hits: 0, reloading: false, vel: new THREE.Vector3(), canJump: true, mouseDown: false, ads: false, lastShot: 0, alive: true, won: false, crouchAmt: 0, speedUntil: 0, camMode: 0, potions: { health: 0, shield: 0, speed: 0 } as Record<string, number>, invuln: false, lastKickKills: 0, moveX: 0, moveZ: 0, yaw: 0, pitch: 0, touch: false, matchXp: 0, mode: "single" as Mode, inv: emptyInv(), equip: 0, countEnd: 0 };
     const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0);
     state.touch = isTouch; setIsTouch(isTouch);
     const keys: Record<string, boolean> = {};
@@ -538,7 +580,7 @@ export default function Game() {
         raycaster.set(origin, dir); raycaster.far = 500;
         const hits = raycaster.intersectObjects([...botParts, ...targetParts, ...solids], false);
         if (hits.length) { const h = hits[0]; if (p === 0 || w.pellets <= 3) addTracer(mw, h.point);
-          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0) { const b = bots[idx]; if (!b.dying && !b.dead) { const head = h.object.name === "head"; b.hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (b.hp <= 0) { b.dying = true; b.dieAt = now() + (b.dummy ? 700 : 1000); const bi = botParts.indexOf(b.body); if (bi >= 0) botParts.splice(bi, 1); const hi = botParts.indexOf(b.head); if (hi >= 0) botParts.splice(hi, 1); if (b.dummy) state.score += 25; else { state.kills++; state.score += head ? 150 : 100; } } } } }
+          if (botParts.includes(h.object)) { const idx = bots.findIndex((b) => b.body === h.object || b.head === h.object); if (idx >= 0) { const b = bots[idx]; if (!b.dying && !b.dead) { const head = h.object.name === "head"; b.hp -= head ? w.dmg * 3 : w.dmg; state.hits++; setHit((v) => v + 1); sfx(head ? "head" : "hit"); if (b.hp <= 0) { b.dying = true; b.dieAt = now() + (b.dummy ? 700 : 1000); const bi = botParts.indexOf(b.body); if (bi >= 0) botParts.splice(bi, 1); const hi = botParts.indexOf(b.head); if (hi >= 0) botParts.splice(hi, 1); if (b.dummy) { state.score += 25; state.matchXp += 20; } else { state.kills++; state.score += head ? 150 : 100; state.matchXp += head ? 150 : 100; } } } } }
           else if (targetParts.includes(h.object)) { state.hits++; state.score += 50; setHit((v) => v + 1); sfx("hit"); const tg = targets.find((t) => t.mesh === h.object); if (tg) { tg.mesh.visible = false; window.setTimeout(() => { tg.mesh.visible = true; }, 700); } }
         } else if (p === 0) addTracer(mw, mw.clone().add(dir.multiplyScalar(250)));
       }
@@ -573,7 +615,7 @@ export default function Game() {
       sfx("loot"); showToast(`Swapped → ${g.kind === "weapon" ? WEAPONS[g.id].name : HEALS[g.id].name}`); syncInv(); syncHud(true);
     };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
-    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = r === "legendary" ? [...RAR_POOL.legendary, ...metaRef.current.weapons] : RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
+    const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = r === "legendary" ? [...RAR_POOL.legendary, ...metaRef.current.weapons] : RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); state.matchXp += 40; sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
 
     function now() { return performance.now(); }
     const tryInteract = () => {
@@ -598,7 +640,7 @@ export default function Game() {
     const reset = (m: Mode, idx: number) => {
       for (let i = bots.length - 1; i >= 0; i--) removeBot(i); targets.length = 0; targetParts.length = 0;
       buildMap(idx);
-      state.hp = 100; state.score = 0; state.kills = 0; state.shots = 0; state.hits = 0; state.reloading = false; state.alive = true; state.mode = m; state.vel.set(0, 0, 0);
+      state.hp = 100; state.score = 0; state.kills = 0; state.shots = 0; state.hits = 0; state.matchXp = 0; state.reloading = false; state.alive = true; state.mode = m; state.vel.set(0, 0, 0);
       state.won = false; state.inv = emptyInv(); state.inv[0] = { type: "weapon", wId: "pistol", ammo: WEAPONS.pistol.mag, reserve: WEAPONS.pistol.mag * 2 }; state.equip = 0; setViewModel("pistol"); syncInv();
       state.shield = 0; state.speedUntil = 0; state.camMode = 0; state.invuln = false; state.lastKickKills = 0; playerModel.visible = false; gun.visible = true;
       state.potions = { health: metaRef.current.potions.health || 0, shield: metaRef.current.potions.shield || 0, speed: metaRef.current.potions.speed || 0 }; syncPotions();
@@ -630,7 +672,15 @@ export default function Game() {
       sprintHold: (v) => { keys[settingsRef.current.binds.sprint] = v; },
       interact: () => tryInteract(),
     };
-    const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(placement); controls.unlock(); setPhase("dead"); };
+    const endMatch = (coinBonus: number, place: number) => {
+      const cur = metaRef.current; const m: Meta = { ...cur, skins: [...cur.skins], weapons: [...cur.weapons], potions: { ...cur.potions } };
+      m.coins += coinBonus; const winXp = place === 1 ? 500 : 0; m.xp += state.matchXp + winXp;
+      const tier = bpTier(m.xp);
+      for (let t = m.bpFree + 1; t <= tier; t++) { const r = BP_FREE[t - 1]; if (r) grantBp(m, r); } m.bpFree = Math.max(m.bpFree, tier);
+      if (m.bp) { for (let t = m.bpPrem + 1; t <= tier; t++) grantBp(m, BP_PREM[t - 1]); m.bpPrem = Math.max(m.bpPrem, tier); }
+      applyMeta(m); setWinCoins(coinBonus); setPlace(place); setMatchXpShow(state.matchXp + winXp);
+    };
+    const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; endMatch(earned, placement); controls.unlock(); setPhase("dead"); };
     const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
     window.addEventListener("resize", onResize);
 
@@ -695,7 +745,7 @@ export default function Game() {
           soccer.ball.rotation.x += dt * 22; soccer.ball.rotation.z += dt * 10;
           // motion-blur trail
           const gm = new THREE.Mesh(new THREE.SphereGeometry(0.36, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false })); gm.position.copy(soccer.ball.position); worldGrp.add(gm); ballTrail.push({ m: gm, life: 0.4 });
-          if (p >= 1) { soccer.kicking = false; state.lastKickKills = state.kills; metaRef.current.coins += 100; applyMeta({ ...metaRef.current }); setGoalShow(true); window.setTimeout(() => setGoalShow(false), 2800); window.setTimeout(() => { state.invuln = false; }, 2600); const s2 = soccer; window.setTimeout(() => { if (s2) { s2.ball.position.copy(s2.home); s2.ball.rotation.set(0, 0, 0); } }, 1800); }
+          if (p >= 1) { soccer.kicking = false; state.lastKickKills = state.kills; state.matchXp += 300; metaRef.current.coins += 100; applyMeta({ ...metaRef.current }); setGoalShow(true); window.setTimeout(() => setGoalShow(false), 2800); window.setTimeout(() => { state.invuln = false; }, 2600); const s2 = soccer; window.setTimeout(() => { if (s2) { s2.ball.position.copy(s2.home); s2.ball.rotation.set(0, 0, 0); } }, 1800); }
         }
         // medkit pickups
         for (const p of pickups) { if (p.active) { p.group.rotation.y += dt * 1.5; p.group.position.y = 0.9 + Math.sin(t * 2) * 0.12; if (state.hp < 100 && camera.position.distanceToSquared(p.pos) < 2.4) { state.hp = Math.min(100, state.hp + 30); p.active = false; p.group.visible = false; p.respawn = nowt + 18000; sfx("heal"); showToast("+30 HP"); syncHud(true); } } else if (nowt > p.respawn) { p.active = true; p.group.visible = true; } }
@@ -710,7 +760,7 @@ export default function Game() {
             if (b.dying) { b.group.rotation.z += (1.55 - b.group.rotation.z) * Math.min(1, dt * 7); if (now() > (b.dieAt || 0)) { b.dying = false; b.dead = true; b.group.visible = false; b.respawnAt = now() + 3000; } continue; }
             tmp.set(eye.x - b.group.position.x, 0, eye.z - b.group.position.z).normalize(); b.group.rotation.y = Math.atan2(tmp.x, tmp.z);
           }
-          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; const earned = 150; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(1); controls.unlock(); setPhase("win"); }
+          if (state.mode === "single" && !state.won && bots.filter((b) => !b.dummy && !b.dying).length === 0) { state.won = true; state.alive = false; endMatch(150, 1); controls.unlock(); setPhase("win"); }
         }
 
         if (state.ads !== lastAds) { lastAds = state.ads; setAiming(state.ads); }
@@ -835,28 +885,59 @@ export default function Game() {
       )}
 
       {phase === "menu" && (
-        <Overlay>
-          <button onClick={() => setShowTeams(true)} className="absolute right-4 top-4 flex items-center gap-2 rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-sm font-bold backdrop-blur hover:bg-white/10">
+        <div className="fade-in absolute inset-0 z-10 flex flex-col items-center justify-center overflow-y-auto bg-[#05060a] px-4 py-8">
+          {/* animated backdrop */}
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="menu-glow absolute -left-1/4 top-1/4 h-[70vh] w-[70vh] rounded-full bg-cyan-500/20 blur-[120px]" />
+            <div className="menu-glow absolute -right-1/4 top-0 h-[60vh] w-[60vh] rounded-full bg-fuchsia-600/20 blur-[120px]" style={{ animationDelay: "-7s" }} />
+            <div className="menu-grid absolute inset-0" />
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#05060a]" />
+          </div>
+
+          <button onClick={() => setShowTeams(true)} className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-sm font-bold backdrop-blur hover:bg-white/10">
             <span className="text-lg">{meta.team ? TEAMS.find((t) => t.id === meta.team)?.flag : "🏆"}</span>
             {meta.team ? TEAMS.find((t) => t.id === meta.team)?.name : "Pick your team"}
           </button>
-          <div className="w-full max-w-3xl rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.08] to-transparent p-8 text-center shadow-2xl sm:p-12">
-            <Title />
+
+          <div className="relative z-10 w-full max-w-3xl text-center">
+            <div className="title-pulse"><Title /></div>
             <p className="mt-2 text-sm font-bold tracking-[0.5em] text-cyan-300/70">3D BROWSER FPS</p>
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+
+            {/* level bar */}
+            <div className="mx-auto mt-5 w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 backdrop-blur">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="rounded-md bg-cyan-400/15 px-2 py-0.5 text-cyan-300">LEVEL {Math.floor(meta.xp / XP_PER)}</span>
+                <span className="flex items-center gap-2 text-white/50">{meta.bp && <span className="text-yellow-300">⭐ PRO</span>}{meta.xp % XP_PER} / {XP_PER} XP</span>
+              </div>
+              <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full bg-gradient-to-r from-cyan-400 to-violet-500" style={{ width: `${((meta.xp % XP_PER) / XP_PER) * 100}%` }} /></div>
+            </div>
+
+            {/* battle pass banner */}
+            <button onClick={() => setPhase("bp")} className="group mx-auto mt-4 flex w-full max-w-md items-center gap-3 overflow-hidden rounded-2xl border border-yellow-400/50 bg-gradient-to-r from-yellow-500/20 via-amber-500/10 to-transparent px-4 py-3 text-left transition hover:brightness-110">
+              <span className="text-3xl transition group-hover:scale-110">🎟️</span>
+              <div className="flex-1">
+                <div className="text-sm font-black tracking-wide text-yellow-200">BATTLE PASS · SEASON 1</div>
+                <div className="text-[11px] text-white/60">{meta.bp ? "Premium unlocked — 100 tiers of rewards" : "100 tiers · unlock premium for epic rewards"}</div>
+              </div>
+              <span className="rounded-lg bg-yellow-400 px-3 py-1.5 text-xs font-black text-black">{meta.bp ? "VIEW" : "GET IT"}</span>
+            </button>
+
+            {/* utility row */}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2.5">
               <span className="rounded-full bg-yellow-400/15 px-3 py-1.5 text-sm font-bold text-yellow-300">🪙 {meta.coins}</span>
               <button onClick={() => setPhase("shop")} className="rounded-full border border-violet-400/60 bg-violet-500/10 px-4 py-1.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button>
               <button onClick={() => setShowLocker(true)} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">🎒 LOCKER</button>
               <button onClick={() => setPhase("settings")} className="rounded-full border border-white/20 px-4 py-1.5 text-sm font-bold text-white/80 hover:bg-white/10">⚙️ SETTINGS</button>
             </div>
+
             <p className="mt-6 text-[11px] uppercase tracking-[0.3em] text-white/40">Mode</p>
             <div className="mt-2 flex flex-wrap justify-center gap-3"><ModeCard active={mode === "single"} onClick={() => setMode("single")} icon="🤖" title="Single Player" desc="10 bots — last one standing" /><ModeCard active={mode === "training"} onClick={() => setMode("training")} icon="🎯" title="Training" desc="Targets + dummies + accuracy" /><ModeCard active={false} onClick={() => setPhase("multiplayer")} icon="🌐" title="Multiplayer" desc="Online — coming soon" soon /></div>
             <p className="mt-5 text-[11px] uppercase tracking-[0.3em] text-white/40">Map</p>
             <div className="mt-2 flex flex-wrap justify-center gap-2">{MAPS.map((m, i) => (<button key={m.name} onClick={() => setMapIdx(i)} className={`w-40 rounded-lg border px-3 py-2 text-left transition ${mapIdx === i ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><div className="text-sm font-bold">{m.name}</div><div className="text-[11px] text-white/50">{m.desc}</div></button>))}</div>
-            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="mt-7 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-14 py-3.5 text-2xl font-black tracking-wider text-black transition hover:scale-105 hover:brightness-110" style={{ boxShadow: "0 0 40px -8px rgba(0,200,255,0.8)" }}>▶ PLAY</button>
+            <button onClick={() => apiRef.current?.start(mode, mapIdx)} className="btn-sheen mt-7 rounded-xl px-16 py-4 text-2xl font-black tracking-wider text-black transition hover:scale-105" style={{ boxShadow: "0 0 50px -8px rgba(0,200,255,0.9)" }}>▶ PLAY</button>
             <p className="mt-2 text-[11px] text-white/40">{isTouch ? "Tap PLAY · left joystick to move · drag right side to look · 🔫 to shoot" : "Click Play, then move your mouse to look around"}</p>
           </div>
-        </Overlay>
+        </div>
       )}
       {phase === "shop" && (
         <div className="fade-in absolute inset-0 z-10 overflow-y-auto bg-black/85 backdrop-blur-sm">
@@ -989,10 +1070,51 @@ export default function Game() {
         </div>
       )}
 
+      {phase === "bp" && (() => {
+        const tier = bpTier(meta.xp); const prog = meta.xp % XP_PER;
+        const rew = (r: BpRew | null, on: boolean, prem: boolean) => (
+          <div className={`flex h-14 w-14 flex-col items-center justify-center rounded-lg border text-center ${on ? "" : "opacity-40"} ${prem ? "border-yellow-400/50 bg-yellow-400/[0.06]" : "border-white/15 bg-white/[0.03]"}`}>
+            <div className="text-lg leading-none">{r ? r.icon : ""}</div>
+            <div className="mt-0.5 text-[8px] leading-tight text-white/60">{r ? (r.kind === "coins" ? r.amount : r.kind === "skin" ? (SKINS[r.id!]?.name.split(" ")[0]) : r.kind === "weapon" ? WEAPONS[r.id!]?.abbr : r.label) : ""}</div>
+          </div>
+        );
+        return (
+          <div className="fade-in absolute inset-0 z-10 overflow-y-auto bg-black/92 backdrop-blur-sm">
+            <div className="mx-auto max-w-3xl px-5 py-8">
+              <div className="flex items-center justify-between">
+                <h2 className="text-3xl font-black tracking-widest">🎟️ BATTLE PASS <span className="text-sm font-normal text-white/40">· Season 1</span></h2>
+                <button onClick={() => setPhase("menu")} className="rounded-lg border border-white/20 px-4 py-1.5 text-sm hover:bg-white/10">← Back</button>
+              </div>
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex items-center justify-between text-sm"><span>Tier <b className="text-lg text-cyan-300">{tier}</b> / 100</span><span className="text-white/50">{prog} / {XP_PER} XP</span></div>
+                <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${(prog / XP_PER) * 100}%` }} /></div>
+                {!meta.bp ? (<>
+                  <div className="mt-4 flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+                    <p className="text-xs text-white/60">Unlock the <b className="text-yellow-300">Premium</b> track — you instantly get <b>every</b> premium reward up to tier {tier}!</p>
+                    <button onClick={buyBp} className="shrink-0 rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 px-6 py-2.5 text-sm font-bold text-black hover:brightness-110">Buy Battle Pass · $9.99</button>
+                  </div>
+                  <p className="mt-2 text-center text-[10px] text-white/40">⚠️ Demo — clicking unlocks it instantly, no real charge</p>
+                </>) : <div className="mt-3 rounded-lg bg-yellow-400/15 py-1.5 text-center text-xs font-bold text-yellow-300">⭐ PREMIUM UNLOCKED — you get both tracks</div>}
+              </div>
+              <div className="mt-4 flex gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-white/40"><div className="w-8">Tier</div><div className="flex-1">Free</div><div className="flex-1 text-yellow-300">Premium</div></div>
+              <div className="mt-1 space-y-1.5">
+                {Array.from({ length: 100 }, (_, i) => { const t = i + 1; const on = tier >= t; return (
+                  <div key={t} className={`flex items-center gap-2 rounded-lg px-2 py-1 ${on ? "bg-cyan-400/[0.06]" : ""}`}>
+                    <div className={`w-8 text-center text-sm font-black ${on ? "text-cyan-300" : "text-white/30"}`}>{t}</div>
+                    <div className="flex-1">{BP_FREE[i] ? rew(BP_FREE[i], on, false) : <div className="h-14 w-14 rounded-lg border border-dashed border-white/10" />}</div>
+                    <div className="flex-1">{rew(BP_PREM[i], on && meta.bp, true)}</div>
+                  </div>
+                ); })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {phase === "multiplayer" && (<Overlay><h2 className="text-3xl font-bold tracking-widest text-cyan-300">🌐 ONLINE MULTIPLAYER</h2><p className="mt-4 max-w-md text-center text-sm text-white/70">Real-time online play needs a dedicated game server (WebSockets + netcode) that Vercel can&apos;t host. It&apos;s <span className="text-yellow-300">coming soon</span> — needs a separate realtime backend (Colyseus/Socket.IO on Railway/Fly.io).</p><PlayButton label="← Back" onClick={() => setPhase("menu")} /></Overlay>)}
       {phase === "paused" && (<Overlay><h2 className="text-3xl font-bold tracking-widest">PAUSED</h2><Controls /><PlayButton label="▶ RESUME" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
-      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins earned!</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
-      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-2 text-2xl font-bold">#{place} <span className="text-base font-normal text-white/60">place</span></p><p className="mt-2 text-lg">{hud.kills} kills · {acc}% acc</p><p className="mt-3 rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙 coins</p><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("shop")} className="mt-7 rounded-lg border border-violet-400/60 bg-violet-500/10 px-6 py-3.5 text-lg font-bold text-violet-200 hover:bg-violet-500/20">🛒 SHOP</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
+      {phase === "win" && (<Overlay><h2 className="text-5xl font-black tracking-widest text-yellow-300" style={{ textShadow: "0 0 30px rgba(255,200,40,0.6)" }}>🏆 VICTORY</h2><p className="mt-3 text-lg text-white/80">Last one standing!</p><p className="mt-1 text-base">Score <span className="font-bold text-yellow-300">{hud.score}</span> · {hud.kills} kills · {acc}% acc</p><div className="mt-3 flex gap-2"><span className="rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙</span><span className="rounded-full bg-cyan-400/15 px-4 py-1.5 text-lg font-bold text-cyan-300">+{matchXpShow} XP</span></div><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("bp")} className="mt-7 rounded-lg border border-yellow-400/60 bg-yellow-400/10 px-6 py-3.5 text-lg font-bold text-yellow-200 hover:bg-yellow-400/20">🎟️ PASS</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
+      {phase === "dead" && (<Overlay><h2 className="text-4xl font-black tracking-widest text-red-500">YOU DIED</h2><p className="mt-2 text-2xl font-bold">#{place} <span className="text-base font-normal text-white/60">place</span></p><p className="mt-2 text-lg">{hud.kills} kills · {acc}% acc</p><div className="mt-3 flex gap-2"><span className="rounded-full bg-yellow-400/15 px-4 py-1.5 text-lg font-bold text-yellow-300">+{winCoins} 🪙</span><span className="rounded-full bg-cyan-400/15 px-4 py-1.5 text-lg font-bold text-cyan-300">+{matchXpShow} XP</span></div><div className="mt-6 flex gap-3"><PlayButton label="↻ PLAY AGAIN" onClick={() => apiRef.current?.start(mode, mapIdx)} /><button onClick={() => setPhase("bp")} className="mt-7 rounded-lg border border-yellow-400/60 bg-yellow-400/10 px-6 py-3.5 text-lg font-bold text-yellow-200 hover:bg-yellow-400/20">🎟️ PASS</button></div><button onClick={() => setPhase("menu")} className="mt-4 rounded-xl border border-white/25 bg-white/5 px-8 py-3 text-lg font-bold text-white/90 transition hover:scale-105 hover:bg-white/15">🏠 MAIN MENU</button></Overlay>)}
 
       {showControls && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowControls(false)}>
