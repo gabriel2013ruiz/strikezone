@@ -450,13 +450,15 @@ export default function Game() {
       else if (acc === "visor") { const v = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.09, 0.05), new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 2 })); v.position.set(0, 2.08, 0.21); pmAccessory.add(v); }
       else if (acc === "hood") { const h = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10, 0, Math.PI * 2, 0, Math.PI / 1.5), new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 })); h.position.y = 2.14; h.castShadow = true; pmAccessory.add(h); }
     };
+    const flagTex = (flag: string, bg: number) => { const cv = document.createElement("canvas"); cv.width = cv.height = 128; const c = cv.getContext("2d")!; c.fillStyle = "#" + bg.toString(16).padStart(6, "0"); c.fillRect(0, 0, 128, 128); c.font = "84px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(flag, 64, 74); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t; };
     const applyPlayerSkin = (id: string) => {
       const s = SKINS[id] || SKINS.ranger;
-      // the "team" (National Kit) skin uses the chosen country's colors; other skins use their own
+      // the "team" (National Kit) skin shows the chosen country's FLAG + colors; other skins use their own
       const tm = id === "team" && metaRef.current.team ? TEAMS.find((t) => t.id === metaRef.current.team) : null;
       const bodyCol = tm ? tm.color : s.color, accentCol = tm ? tm.color : (s.accent ?? s.color);
-      pmVest.color.setHex(bodyCol);
-      pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0;
+      if (pmVest.map) { pmVest.map.dispose(); pmVest.map = null; }
+      if (tm) { pmVest.color.setHex(0xffffff); pmVest.map = flagTex(tm.flag, tm.color); } else { pmVest.color.setHex(bodyCol); }
+      pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0; pmVest.needsUpdate = true;
       pmHelm.color.setHex(accentCol);
       buildAccessory(tm ? "none" : (s.acc ?? "none"), accentCol);
     };
@@ -1025,7 +1027,7 @@ export default function Game() {
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {meta.skins.map((id) => { const base = SKINS[id]; if (!base) return null; const tm = id === "team" && meta.team ? TEAMS.find((t) => t.id === meta.team) : null; const s = tm ? { ...base, name: `${tm.flag} ${tm.name}`, color: tm.color, accent: tm.color } : base; if (id === "team" && !tm) return null; const eq = meta.skin === id; const col = RARITY[s.rarity].c; return (
                 <div key={id} className="rounded-2xl border-2 p-3 text-center" style={{ borderColor: col }}>
-                  <div className="py-1"><SkinAvatar s={s} /></div>
+                  <div className="py-1"><SkinAvatar s={s} flag={tm ? tm.flag : undefined} /></div>
                   <div className="mt-1 text-xs font-bold">{s.name}</div>
                   {eq ? <div className="mt-2 rounded bg-emerald-500/20 py-1 text-[11px] font-bold text-emerald-300">EQUIPPED</div> : <button onClick={() => applyMeta({ ...meta, skin: id })} className="mt-2 w-full rounded bg-white/10 py-1 text-[11px] font-bold hover:bg-white/20">EQUIP</button>}
                 </div>); })}
@@ -1089,7 +1091,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Slider({ label, min, max, step, value, onChange, fmt }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; fmt: (v: number) => string }) { return (<div className="py-1.5"><div className="mb-1 flex justify-between text-sm"><span className="text-white/70">{label}</span><span className="font-bold text-cyan-200">{fmt(value)}</span></div><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(+e.target.value)} className="w-full accent-cyan-400" /></div>); }
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) { return (<button onClick={onClick} className="flex w-full items-center justify-between py-2 text-sm"><span className="text-white/70">{label}</span><span className={`relative h-6 w-11 rounded-full transition ${on ? "bg-cyan-400" : "bg-white/15"}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${on ? "left-[22px]" : "left-0.5"}`} /></span></button>); }
 function Overlay({ children }: { children: React.ReactNode }) { return <div className="fade-in absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70 px-4 backdrop-blur-sm">{children}</div>; }
-function SkinAvatar({ s }: { s: Skin }) {
+function SkinAvatar({ s, flag }: { s: Skin; flag?: string }) {
   const body = `#${s.color.toString(16).padStart(6, "0")}`;
   const accent = `#${(s.accent ?? 0xffffff).toString(16).padStart(6, "0")}`;
   return (
@@ -1100,7 +1102,7 @@ function SkinAvatar({ s }: { s: Skin }) {
       <div className="absolute left-1/2 top-4 h-7 w-7 -translate-x-1/2 rounded-md" style={{ background: "#c98d63" }}>
         {s.acc === "visor" && <div className="absolute left-1/2 top-3 h-1.5 w-6 -translate-x-1/2 rounded" style={{ background: accent, boxShadow: `0 0 8px ${accent}` }} />}
       </div>
-      <div className="absolute bottom-0 left-1/2 h-9 w-11 -translate-x-1/2 rounded-t-lg" style={{ background: body, boxShadow: s.emissive ? `0 0 14px ${accent}` : "none" }} />
+      <div className="absolute bottom-0 left-1/2 flex h-9 w-11 -translate-x-1/2 items-center justify-center rounded-t-lg text-base" style={{ background: body, boxShadow: s.emissive ? `0 0 14px ${accent}` : "none" }}>{flag}</div>
     </div>
   );
 }
