@@ -79,6 +79,7 @@ const SKINS: Record<string, Skin> = {
   neon: { name: "Neon Striker", color: 0x101014, price: 0, rarity: "epic", crateOnly: true, accent: 0x22ff88, emissive: 0x22ff88, acc: "visor", icon: "🟢" },
   shadow: { name: "Shadow Assassin", color: 0x141418, price: 2000, rarity: "legendary", accent: 0x6b21a8, emissive: 0x2a0a4a, acc: "hood", icon: "🥷" },
   worldcup: { name: "World Cup 2026 ⚽", color: 0xd4af37, price: 2500, rarity: "legendary", accent: 0xffe08a, metal: 0.85, emissive: 0x4a3a10, acc: "crown", icon: "🏆", limited: true },
+  team: { name: "National Kit", color: 0xffffff, price: 0, rarity: "epic", accent: 0xffffff, acc: "none", icon: "🏳️", crateOnly: true },
 };
 const POTIONS: Record<string, { name: string; icon: string; price: number }> = {
   health: { name: "Health Potion", icon: "❤️", price: 150 },
@@ -95,7 +96,7 @@ const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", 
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
 interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; gunbob: boolean; crosshair: string; crossSize: number; binds: Record<string, string>; }
-const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["swap", "Swap weapon (with ground)"], ["changeSlot", "Change slot"], ["interact", "Open chest / door"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
+const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["swap", "Swap item (with ground)"], ["changeSlot", "Change slot"], ["interact", "Open chest / door"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
 const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", swap: "KeyQ", changeSlot: "KeyX", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
 function loadSettings(): Settings { try { const raw = localStorage.getItem("sz_settings"); if (raw) { const p = JSON.parse(raw); return { ...defaultSettings(), ...p, binds: { ...defaultSettings().binds, ...(p.binds || {}) } }; } } catch {} return defaultSettings(); }
 function saveSettings(s: Settings) { try { localStorage.setItem("sz_settings", JSON.stringify(s)); } catch {} }
@@ -451,12 +452,13 @@ export default function Game() {
     };
     const applyPlayerSkin = (id: string) => {
       const s = SKINS[id] || SKINS.ranger;
-      // if a World Cup team is chosen, the jersey (body) takes the team's colors
-      const team = metaRef.current.team ? TEAMS.find((t) => t.id === metaRef.current.team) : null;
-      pmVest.color.setHex(team ? team.color : s.color);
+      // the "team" (National Kit) skin uses the chosen country's colors; other skins use their own
+      const tm = id === "team" && metaRef.current.team ? TEAMS.find((t) => t.id === metaRef.current.team) : null;
+      const bodyCol = tm ? tm.color : s.color, accentCol = tm ? tm.color : (s.accent ?? s.color);
+      pmVest.color.setHex(bodyCol);
       pmVest.metalness = s.metal ?? 0; pmVest.emissive.setHex(s.emissive ?? 0x000000); pmVest.emissiveIntensity = s.emissive ? 0.5 : 0;
-      pmHelm.color.setHex(team ? team.color : (s.accent ?? s.color));
-      buildAccessory(s.acc ?? "none", team ? team.color : (s.accent ?? 0xffffff));
+      pmHelm.color.setHex(accentCol);
+      buildAccessory(tm ? "none" : (s.acc ?? "none"), accentCol);
     };
 
     /* ---------- bots ---------- */
@@ -555,17 +557,18 @@ export default function Game() {
     const addHeal = (hId: string): boolean => { let i = state.inv.findIndex((s) => s.type === "heal" && s.hId === hId); if (i >= 0) { state.inv[i].count = (state.inv[i].count ?? 0) + 1; syncInv(); return true; } i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return false; state.inv[i] = { type: "heal", hId, count: 1 }; syncInv(); return true; };
     const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; setViewModel(s.wId!); syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
     const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; state.reloading = false; setViewModel(state.inv[state.equip].wId!); syncInv(); syncHud(true); };
-    // swap your equipped weapon for a weapon lying on the ground (works when inventory is full)
+    // swap your current slot for a weapon OR cure lying on the ground (works when inventory is full)
     const swapWeapon = () => {
-      let gi = -1; let bd = 3.0; for (let i = 0; i < grounds.length; i++) { if (grounds[i].kind !== "weapon") continue; const d = grounds[i].pos.distanceTo(camera.position); if (d < bd) { bd = d; gi = i; } }
+      let gi = -1; let bd = 3.0; for (let i = 0; i < grounds.length; i++) { const d = grounds[i].pos.distanceTo(camera.position); if (d < bd) { bd = d; gi = i; } }
       if (gi < 0) return;
-      const eq = state.inv[state.equip]; if (eq.type !== "weapon" || !eq.wId) return;
-      const g = grounds[gi]; const newId = g.id; const oldId = eq.wId;
-      state.inv[state.equip] = { type: "weapon", wId: newId, ammo: WEAPONS[newId].mag, reserve: WEAPONS[newId].mag * 2 };
-      setViewModel(newId);
-      const drop = g.pos.clone(); worldGrp.remove(g.group); g.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); grounds.splice(gi, 1);
-      dropGround("weapon", oldId, WEAPONS[oldId].rarity, drop); // old weapon drops where the new one was
-      sfx("loot"); showToast(`Swapped → ${WEAPONS[newId].name}`); syncInv(); syncHud(true);
+      const g = grounds[gi]; const idx = state.equip; const old = state.inv[idx]; if (old.type === "empty") return;
+      const drop = g.pos.clone();
+      if (g.kind === "weapon") { state.inv[idx] = { type: "weapon", wId: g.id, ammo: WEAPONS[g.id].mag, reserve: WEAPONS[g.id].mag * 2 }; setViewModel(g.id); }
+      else { state.inv[idx] = { type: "heal", hId: g.id, count: 1 }; const wi = state.inv.findIndex((s) => s.type === "weapon"); if (wi >= 0) { state.equip = wi; setViewModel(state.inv[wi].wId!); } }
+      worldGrp.remove(g.group); g.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); grounds.splice(gi, 1);
+      if (old.type === "weapon") dropGround("weapon", old.wId!, WEAPONS[old.wId!].rarity, drop);
+      else if (old.type === "heal") dropGround("heal", old.hId!, HEALS[old.hId!].rarity, drop);
+      sfx("loot"); showToast(`Swapped → ${g.kind === "weapon" ? WEAPONS[g.id].name : HEALS[g.id].name}`); syncInv(); syncHud(true);
     };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
     const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = r === "legendary" ? [...RAR_POOL.legendary, ...metaRef.current.weapons] : RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
@@ -678,7 +681,7 @@ export default function Game() {
         const kb = settingsRef.current.binds;
         let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = state.touch ? "✋ USE → open chest" : `Press ${keyLabel(kb.interact)} to open chest`; break; }
         if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.4) { pr = state.touch ? `✋ USE → ${dr.open ? "close" : "open"} door` : `Press ${keyLabel(kb.interact)} to ${dr.open ? "close" : "open"} door`; break; }
-        if (!pr) for (const g of grounds) if (g.kind === "weapon" && g.pos.distanceTo(camera.position) < 3.0) { pr = state.touch ? "⇄ swap weapon" : `Press ${keyLabel(kb.swap)} to swap weapon`; break; }
+        if (!pr) for (const g of grounds) if (g.pos.distanceTo(camera.position) < 3.0) { pr = state.touch ? "⇄ swap item" : `Press ${keyLabel(kb.swap)} to swap item`; break; }
         if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? (state.touch ? "⚽ kick the ball" : `Press ${keyLabel(kb.kick)} to kick the ball ⚽`) : `Kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // soccer kick animation (invulnerable while it plays)
@@ -883,7 +886,7 @@ export default function Game() {
 
             {shopTab === "skins" && (
               <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {Object.entries(SKINS).map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
+                {Object.entries(SKINS).filter(([id]) => id !== "team").map(([id, s]) => { const owned = meta.skins.includes(id); const equipped = meta.skin === id; const col = RARITY[s.rarity].c; return (
                   <div key={id} className="relative rounded-2xl border-2 p-4 text-center" style={{ borderColor: col }}>{s.limited && <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-red-500 px-2 py-0.5 text-[9px] font-bold">⏳ LIMITED</span>}
                     <div className="mx-auto grid place-items-center rounded-xl py-2" style={{ boxShadow: `0 0 20px -6px ${col}` }}><SkinAvatar s={s} /></div>
                     <div className="mt-2 font-bold text-sm">{s.name}</div>
@@ -1006,7 +1009,7 @@ export default function Game() {
             <p className="mt-1 text-center text-xs text-white/50">World Cup 2026 — who are you repping?</p>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {TEAMS.map((t) => (
-                <button key={t.id} onClick={() => { applyMeta({ ...meta, team: t.id }); setShowTeams(false); }} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-bold transition ${meta.team === t.id ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><span className="text-xl">{t.flag}</span> {t.name}</button>
+                <button key={t.id} onClick={() => { applyMeta({ ...meta, team: t.id, skin: "team", skins: meta.skins.includes("team") ? meta.skins : [...meta.skins, "team"] }); setShowTeams(false); }} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-bold transition ${meta.team === t.id ? "border-cyan-400 bg-cyan-400/10" : "border-white/15 hover:border-white/40"}`}><span className="text-xl">{t.flag}</span> {t.name}</button>
               ))}
             </div>
             <button onClick={() => setShowTeams(false)} className="mt-5 w-full rounded-lg bg-white/10 py-2 text-sm font-bold hover:bg-white/20">Close</button>
@@ -1020,7 +1023,7 @@ export default function Game() {
             <h3 className="text-center text-2xl font-black tracking-widest">🎒 YOUR LOCKER</h3>
             <p className="mt-1 text-center text-xs text-white/50">{meta.skins.length} skin{meta.skins.length !== 1 ? "s" : ""} owned · click to equip</p>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {meta.skins.map((id) => { const s = SKINS[id]; if (!s) return null; const eq = meta.skin === id; const col = RARITY[s.rarity].c; return (
+              {meta.skins.map((id) => { const base = SKINS[id]; if (!base) return null; const tm = id === "team" && meta.team ? TEAMS.find((t) => t.id === meta.team) : null; const s = tm ? { ...base, name: `${tm.flag} ${tm.name}`, color: tm.color, accent: tm.color } : base; if (id === "team" && !tm) return null; const eq = meta.skin === id; const col = RARITY[s.rarity].c; return (
                 <div key={id} className="rounded-2xl border-2 p-3 text-center" style={{ borderColor: col }}>
                   <div className="py-1"><SkinAvatar s={s} /></div>
                   <div className="mt-1 text-xs font-bold">{s.name}</div>
