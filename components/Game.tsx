@@ -93,9 +93,9 @@ interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]
 const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 }, team: "" });
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
-interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; crosshair: string; binds: Record<string, string>; }
-const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["interact", "Open chest"], ["kick", "Kick ball"]];
-const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, crosshair: "#ffffff", binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", interact: "KeyE", kick: "KeyF" } });
+interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; gunbob: boolean; crosshair: string; crossSize: number; binds: Record<string, string>; }
+const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["interact", "Open chest"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
+const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
 function loadSettings(): Settings { try { const raw = localStorage.getItem("sz_settings"); if (raw) { const p = JSON.parse(raw); return { ...defaultSettings(), ...p, binds: { ...defaultSettings().binds, ...(p.binds || {}) } }; } } catch {} return defaultSettings(); }
 function saveSettings(s: Settings) { try { localStorage.setItem("sz_settings", JSON.stringify(s)); } catch {} }
 function keyLabel(c: string) { const m: Record<string, string> = { Space: "Space", ShiftLeft: "Shift", ShiftRight: "RShift", ControlLeft: "Ctrl", ControlRight: "RCtrl", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" }; if (m[c]) return m[c]; return c.replace("Key", "").replace("Digit", ""); }
@@ -267,6 +267,21 @@ export default function Game() {
         seg(xx, cz + (gap / 2 + segD / 2), T, H, segD, H / 2);
         seg(xx, cz, T, H - doorH, gap, doorH + (H - doorH) / 2, false); // lintel
       }
+      // visual DOORS in each opening — hinged and swung OPEN (no collision, so the doorway stays walkable)
+      const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 });
+      const knobMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 1, roughness: 0.3 });
+      const dw = gap - 0.2;
+      const addDoor = (px: number, pz: number, axisX: boolean, open: number) => {
+        const pivot = new THREE.Group(); pivot.position.set(px, 0, pz);
+        const door = new THREE.Mesh(new THREE.BoxGeometry(axisX ? dw : 0.09, doorH, axisX ? 0.09 : dw), doorMat);
+        door.position.set(axisX ? dw / 2 : 0, doorH / 2, axisX ? 0 : dw / 2); door.castShadow = true; pivot.add(door); solids.push(door);
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), knobMat); knob.position.set(axisX ? dw - 0.18 : 0.1, doorH / 2, axisX ? 0.1 : dw - 0.18); pivot.add(knob);
+        pivot.rotation.y = open; worldGrp.add(pivot);
+      };
+      addDoor(cx - gap / 2, cz + d / 2, true, -1.5);   // front
+      addDoor(cx - gap / 2, cz - d / 2, true, 1.5);    // back
+      addDoor(cx - w / 2, cz - gap / 2, false, -1.5);  // left
+      addDoor(cx + w / 2, cz - gap / 2, false, 1.5);   // right
     };
 
     const makeHouse = (cx: number, cz: number, w: number, d: number, base: string) => {
@@ -551,7 +566,7 @@ export default function Game() {
     };
     const tryKick = () => { if (!soccer || soccer.kicking || !state.alive) return; if (camera.position.distanceTo(soccer.home) > 3.8) return; if (state.kills - state.lastKickKills < 4) return; soccer.kicking = true; soccer.kickStart = now(); state.invuln = true; sfx("shoot"); showToast("⚽ KICK!"); };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === B.reload) reload(); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); if (e.code === "Tab") { e.preventDefault(); state.camMode = (state.camMode + 1) % 3; } if (e.code === "Digit8") usePotion("health"); if (e.code === "Digit9") usePotion("shield"); if (e.code === "Digit0") usePotion("speed"); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === "Tab") e.preventDefault(); if (e.code === B.reload) reload(); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (e.code === B.potHeal) usePotion("health"); if (e.code === B.potShield) usePotion("shield"); if (e.code === B.potSpeed) usePotion("speed"); if (e.code === B.camera) state.camMode = (state.camMode + 1) % 3; if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -639,9 +654,7 @@ export default function Game() {
         gun.position.x += (((state.ads ? 0.0 : 0.3)) - gun.position.x) * Math.min(1, dt * 12); gun.position.y += (((state.ads ? -0.14 : -0.26)) - gun.position.y) * Math.min(1, dt * 12);
         gun.position.z += (-0.55 - gun.position.z) * Math.min(1, dt * 13); gun.rotation.x += (0 - gun.rotation.x) * Math.min(1, dt * 13);
         // weapon sway / bob while moving (realism)
-        const moveMag = Math.min(1, Math.hypot(state.vel.x, state.vel.z) / 6);
-        gun.position.y += Math.sin(t * 11) * 0.012 * moveMag * (state.ads ? 0.25 : 1);
-        gun.position.x += Math.cos(t * 5.5) * 0.009 * moveMag * (state.ads ? 0.25 : 1);
+        if (settingsRef.current.gunbob) { const moveMag = Math.min(1, Math.hypot(state.vel.x, state.vel.z) / 6); gun.position.y += Math.sin(t * 11) * 0.012 * moveMag * (state.ads ? 0.25 : 1); gun.position.x += Math.cos(t * 5.5) * 0.009 * moveMag * (state.ads ? 0.25 : 1); }
 
         if (!counting && state.mouseDown && w.auto && nowt - state.lastShot >= w.rate) shoot();
 
@@ -750,7 +763,9 @@ export default function Game() {
           {isTouch && <TouchControls apiRef={apiRef} potions={potionHud} inv={inv} equip={equip} />}
 
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ color: settings.crosshair }}>
-            {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
+            <div style={{ transform: `scale(${settings.crossSize})` }}>
+              {aiming ? <div className="h-1.5 w-1.5 rounded-full bg-current" /> : (<div className="relative h-6 w-6"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-current" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-current" /><span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /></div>)}
+            </div>
           </div>
           {hit > 0 && <div key={hit} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-45" style={{ animation: "fadeIn 0.18s ease forwards reverse" }}><div className="relative h-7 w-7"><span className="absolute left-1/2 top-0 h-2 w-0.5 -translate-x-1/2 bg-red-400" /><span className="absolute bottom-0 left-1/2 h-2 w-0.5 -translate-x-1/2 bg-red-400" /><span className="absolute left-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-red-400" /><span className="absolute right-0 top-1/2 h-0.5 w-2 -translate-y-1/2 bg-red-400" /></div></div>}
 
@@ -930,10 +945,12 @@ export default function Game() {
             <Section title="🎨 Graphics">
               <Toggle label="Shadows" on={settings.shadows} onClick={() => applySettings({ ...settings, shadows: !settings.shadows })} />
               <Toggle label="Bloom / glow" on={settings.bloom} onClick={() => applySettings({ ...settings, bloom: !settings.bloom })} />
+              <Toggle label="Weapon sway (bob)" on={settings.gunbob} onClick={() => applySettings({ ...settings, gunbob: !settings.gunbob })} />
               <Slider label="Field of view" min={60} max={110} step={1} value={settings.fov} onChange={(v) => applySettings({ ...settings, fov: v })} fmt={(v) => `${v}°`} />
             </Section>
             <Section title="🖱️ Mouse & Crosshair">
               <Slider label="Mouse sensitivity" min={0.2} max={3} step={0.1} value={settings.sens} onChange={(v) => applySettings({ ...settings, sens: v })} fmt={(v) => v.toFixed(1)} />
+              <Slider label="Crosshair size" min={0.5} max={2.5} step={0.1} value={settings.crossSize} onChange={(v) => applySettings({ ...settings, crossSize: v })} fmt={(v) => `${v.toFixed(1)}×`} />
               <div className="flex items-center justify-between py-1.5"><span className="text-sm">Crosshair color</span><input type="color" value={settings.crosshair} onChange={(e) => applySettings({ ...settings, crosshair: e.target.value })} className="h-8 w-14 cursor-pointer rounded bg-transparent" /></div>
             </Section>
             <Section title="🎮 Controls — click a key to rebind">
