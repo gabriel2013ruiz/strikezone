@@ -12,7 +12,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; };
+type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; interact: () => void; };
 
 const ARENA = 110;
 const MAPS = [
@@ -94,8 +94,8 @@ const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", 
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
 interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; gunbob: boolean; crosshair: string; crossSize: number; binds: Record<string, string>; }
-const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["interact", "Open chest"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
-const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
+const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["swap", "Swap weapon"], ["interact", "Open chest / door"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
+const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", swap: "KeyQ", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
 function loadSettings(): Settings { try { const raw = localStorage.getItem("sz_settings"); if (raw) { const p = JSON.parse(raw); return { ...defaultSettings(), ...p, binds: { ...defaultSettings().binds, ...(p.binds || {}) } }; } } catch {} return defaultSettings(); }
 function saveSettings(s: Settings) { try { localStorage.setItem("sz_settings", JSON.stringify(s)); } catch {} }
 function keyLabel(c: string) { const m: Record<string, string> = { Space: "Space", ShiftLeft: "Shift", ShiftRight: "RShift", ControlLeft: "Ctrl", ControlRight: "RCtrl", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" }; if (m[c]) return m[c]; return c.replace("Key", "").replace("Digit", ""); }
@@ -208,7 +208,7 @@ export default function Game() {
     type Col = { minx: number; minz: number; maxx: number; maxz: number };
     const colliders: Col[] = []; const spawnSpots: THREE.Vector3[] = []; const spawns: THREE.Vector3[] = [];
     const waterUpdaters: ((t: number) => void)[] = []; const bushZones: { x: number; z: number; r: number }[] = [];
-    interface Door { pivot: THREE.Group; open: boolean; target: number; col: Col; saved: Col; pos: THREE.Vector3; }
+    interface Door { pivot: THREE.Group; open: boolean; target: number; col: Col; saved: Col; pos: THREE.Vector3; openRot: number; }
     const doors: Door[] = [];
     interface Pickup { group: THREE.Group; pos: THREE.Vector3; active: boolean; respawn: number; }
     const pickups: Pickup[] = [];
@@ -267,21 +267,22 @@ export default function Game() {
         seg(xx, cz + (gap / 2 + segD / 2), T, H, segD, H / 2);
         seg(xx, cz, T, H - doorH, gap, doorH + (H - doorH) / 2, false); // lintel
       }
-      // visual DOORS in each opening — hinged and swung OPEN (no collision, so the doorway stays walkable)
+      // real DOORS — start CLOSED (block the doorway); press the interact key to open/close
       const doorMat = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8 });
       const knobMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 1, roughness: 0.3 });
-      const dw = gap - 0.2;
-      const addDoor = (px: number, pz: number, axisX: boolean, open: number) => {
-        const pivot = new THREE.Group(); pivot.position.set(px, 0, pz);
+      const dw = gap - 0.15;
+      const addDoor = (px: number, pz: number, axisX: boolean, openRot: number, doorPos: THREE.Vector3) => {
+        const pivot = new THREE.Group(); pivot.position.set(px, 0, pz); pivot.rotation.y = 0; worldGrp.add(pivot); // closed
         const door = new THREE.Mesh(new THREE.BoxGeometry(axisX ? dw : 0.09, doorH, axisX ? 0.09 : dw), doorMat);
         door.position.set(axisX ? dw / 2 : 0, doorH / 2, axisX ? 0 : dw / 2); door.castShadow = true; pivot.add(door); solids.push(door);
         const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), knobMat); knob.position.set(axisX ? dw - 0.18 : 0.1, doorH / 2, axisX ? 0.1 : dw - 0.18); pivot.add(knob);
-        pivot.rotation.y = open; worldGrp.add(pivot);
+        const col = axisX ? pushCol(px - 0.05, pz - 0.18, px + dw + 0.05, pz + 0.18) : pushCol(px - 0.18, pz - 0.05, px + 0.18, pz + dw + 0.05);
+        doors.push({ pivot, open: false, target: 0, col, saved: { ...col }, pos: doorPos, openRot });
       };
-      addDoor(cx - gap / 2, cz + d / 2, true, -1.5);   // front
-      addDoor(cx - gap / 2, cz - d / 2, true, 1.5);    // back
-      addDoor(cx - w / 2, cz - gap / 2, false, -1.5);  // left
-      addDoor(cx + w / 2, cz - gap / 2, false, 1.5);   // right
+      addDoor(cx - gap / 2, cz + d / 2, true, -1.5, new THREE.Vector3(cx, 0, cz + d / 2));   // front
+      addDoor(cx - gap / 2, cz - d / 2, true, 1.5, new THREE.Vector3(cx, 0, cz - d / 2));    // back
+      addDoor(cx - w / 2, cz - gap / 2, false, -1.5, new THREE.Vector3(cx - w / 2, 0, cz));  // left
+      addDoor(cx + w / 2, cz - gap / 2, false, 1.5, new THREE.Vector3(cx + w / 2, 0, cz));   // right
     };
 
     const makeHouse = (cx: number, cz: number, w: number, d: number, base: string) => {
@@ -290,7 +291,6 @@ export default function Game() {
       const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.3, d + 0.4), new THREE.MeshStandardMaterial({ color: 0x7a3b2e, roughness: 0.95 })); roof.position.set(cx, H + 0.15, cz); roof.castShadow = true; worldGrp.add(roof); solids.push(roof);
       furnish(cx, cz, w, d);
       if (Math.random() < 0.55) makeChest(cx + w / 4, cz - d / 6);
-      spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
     const makeTower = (cx: number, cz: number, w: number, d: number, base: string) => {
@@ -307,7 +307,6 @@ export default function Game() {
       for (let i = 0; i <= steps; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(1.9, stepH, Math.max(0.75, run + 0.25)), new THREE.MeshStandardMaterial({ color: 0x55555c, roughness: 1 })); st.position.set(stairX, (i + 0.5) * stepH, cz - d / 2 + 1.2 + i * run); st.castShadow = true; st.receiveShadow = true; addFloor(st); }
       furnish(cx, cz - d * 0.28, w * 0.7, d * 0.45);
       makeChest(cx + w / 5, cz - d / 5);
-      spawnSpots.push(new THREE.Vector3(cx, 0, cz));
     };
 
     const woodTex = tex((c, s) => { c.fillStyle = "#6b4a26"; c.fillRect(0, 0, s, s); for (let i = 0; i < s; i += 22) { c.fillStyle = `rgba(0,0,0,${0.08 + Math.random() * 0.08})`; c.fillRect(0, i, s, 3); c.fillStyle = `rgba(255,220,170,${0.04})`; c.fillRect(0, i + 8, s, 2); } });
@@ -331,7 +330,6 @@ export default function Game() {
       const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 2.4, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })); glow.position.y = 1.2; g.add(glow);
       g.position.set(x, 0, z); worldGrp.add(g);
       chests.push({ group: g, pos: new THREE.Vector3(x, 0.6, z), opened: false, glow, lid });
-      spawnSpots.push(new THREE.Vector3(x, 0, z));
     };
 
     const makeSoccer = (cx: number, cz: number) => {
@@ -562,11 +560,13 @@ export default function Game() {
     function now() { return performance.now(); }
     const tryInteract = () => {
       let bestC: Chest | null = null, bd = 3.6; for (const c of chests) if (!c.opened) { const d = c.pos.distanceTo(camera.position); if (d < bd) { bd = d; bestC = c; } }
-      if (bestC) openChest(bestC);
+      if (bestC) { openChest(bestC); return; }
+      let bi = -1; let dd = 3.4; for (let i = 0; i < doors.length; i++) { const dist = doors[i].pos.distanceTo(camera.position); if (dist < dd) { dd = dist; bi = i; } }
+      if (bi >= 0) { const dr = doors[bi]; dr.open = !dr.open; dr.target = dr.open ? dr.openRot : 0; const c = dr.col; if (dr.open) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } sfx("door"); }
     };
     const tryKick = () => { if (!soccer || soccer.kicking || !state.alive) return; if (camera.position.distanceTo(soccer.home) > 3.8) return; if (state.kills - state.lastKickKills < 4) return; soccer.kicking = true; soccer.kickStart = now(); state.invuln = true; sfx("shoot"); showToast("⚽ KICK!"); };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === "Tab") e.preventDefault(); if (e.code === B.reload) reload(); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (e.code === B.potHeal) usePotion("health"); if (e.code === B.potShield) usePotion("shield"); if (e.code === B.potSpeed) usePotion("speed"); if (e.code === B.camera) state.camMode = (state.camMode + 1) % 3; if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === "Tab") e.preventDefault(); if (e.code === B.reload) reload(); if (e.code === B.swap) cycleW(1); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (e.code === B.potHeal) usePotion("health"); if (e.code === B.potShield) usePotion("shield"); if (e.code === B.potSpeed) usePotion("speed"); if (e.code === B.camera) state.camMode = (state.camMode + 1) % 3; if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -609,6 +609,7 @@ export default function Game() {
       swap: () => cycleW(1),
       slot: (i) => useSlot(i),
       sprintHold: (v) => { keys[settingsRef.current.binds.sprint] = v; },
+      interact: () => tryInteract(),
     };
     const die = () => { state.alive = false; const aliveLeft = bots.filter((b) => !b.dummy && !b.dying && !b.dead).length; const placement = aliveLeft + 1; const earned = placement === 1 ? 150 : placement === 2 ? 100 : placement === 3 ? 50 : 20; metaRef.current.coins += earned; applyMeta({ ...metaRef.current }); setWinCoins(earned); setPlace(placement); controls.unlock(); setPhase("dead"); };
     const onResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
@@ -659,10 +660,9 @@ export default function Game() {
         if (!counting && state.mouseDown && w.auto && nowt - state.lastShot >= w.rate) shoot();
 
         for (const bz of bushZones) { if ((camera.position.x - bz.x) ** 2 + (camera.position.z - bz.z) ** 2 < bz.r * bz.r) { playerHidden = true; break; } }
-        // auto-open doors when the player is near (so buildings are always enterable)
-        for (const dr of doors) { const near = dr.pos.distanceTo(camera.position) < 4.2; if (near !== dr.open) { dr.open = near; dr.target = near ? -Math.PI / 1.9 : 0; const c = dr.col; if (near) { c.minx = c.maxx = c.minz = c.maxz = 99999; } else { c.minx = dr.saved.minx; c.maxx = dr.saved.maxx; c.minz = dr.saved.minz; c.maxz = dr.saved.maxz; } } }
-        // interact prompt (chests + soccer)
+        // interact prompt (chests + doors + soccer)
         let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; }
+        if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.4) { pr = dr.open ? "close door" : "open door"; break; }
         if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? "kick the ball ⚽ (F)" : `kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // soccer kick animation (invulnerable while it plays)
@@ -1046,7 +1046,8 @@ function TouchControls({ apiRef, potions, inv, equip }: { apiRef: React.MutableR
       <button className={`${b} absolute right-4 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.pause(); }}>⏸️</button>
       <button className={`${b} absolute right-16 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.cam(); }}>👁️</button>
       <button className={`${b} absolute right-28 top-4 h-11 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.kick(); }}>⚽</button>
-      <button className={`${b} absolute bottom-40 right-32 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.swap(); }}>🔀</button>
+      <button className={`${b} absolute bottom-16 right-52 h-14 w-16 text-sm`} onPointerDown={(e) => { stop(e); api()?.interact(); }}>✋ USE</button>
+      <button className={`${b} absolute bottom-36 right-52 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.swap(); }}>🔀</button>
       <button className={`${b} absolute bottom-44 left-6 h-12 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.sprintHold(true); }} onPointerUp={() => api()?.sprintHold(false)} onPointerCancel={() => api()?.sprintHold(false)}>🏃</button>
       {/* tappable inventory strip — change weapon / use items */}
       <div className="absolute left-1/2 top-3 flex -translate-x-1/2 gap-1">
