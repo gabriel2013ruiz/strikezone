@@ -12,7 +12,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 type Phase = "menu" | "playing" | "paused" | "dead" | "multiplayer" | "win" | "shop" | "settings";
 type Mode = "single" | "training";
 type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; interact: () => void; };
+type GameApi = { start: (mode: Mode, map: number) => void; move: (x: number, z: number) => void; look: (dx: number, dy: number) => void; fire: (v: boolean) => void; ads: (v: boolean) => void; jump: () => void; reloadW: () => void; crouchHold: (v: boolean) => void; potion: (id: "health" | "shield" | "speed") => void; kick: () => void; cam: () => void; pause: () => void; swap: () => void; cycle: () => void; slot: (i: number) => void; sprintHold: (v: boolean) => void; interact: () => void; };
 
 const ARENA = 110;
 const MAPS = [
@@ -94,8 +94,8 @@ const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", 
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
 interface Settings { sens: number; fov: number; volume: number; sfx: boolean; shadows: boolean; bloom: boolean; gunbob: boolean; crosshair: string; crossSize: number; binds: Record<string, string>; }
-const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["swap", "Swap weapon"], ["interact", "Open chest / door"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
-const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", swap: "KeyQ", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
+const BIND_ACTIONS: [string, string][] = [["forward", "Move forward"], ["back", "Move back"], ["left", "Move left"], ["right", "Move right"], ["jump", "Jump"], ["crouch", "Crouch"], ["sprint", "Sprint"], ["reload", "Reload"], ["swap", "Swap weapon (with ground)"], ["changeSlot", "Change slot"], ["interact", "Open chest / door"], ["kick", "Kick ball"], ["potHeal", "❤️ Health potion"], ["potShield", "🛡️ Shield potion"], ["potSpeed", "⚡ Speed potion"], ["camera", "Camera view"]];
+const defaultSettings = (): Settings => ({ sens: 1, fov: 80, volume: 0.8, sfx: true, shadows: true, bloom: true, gunbob: true, crosshair: "#ffffff", crossSize: 1, binds: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", crouch: "KeyC", sprint: "ShiftLeft", reload: "KeyR", swap: "KeyQ", changeSlot: "KeyX", interact: "KeyE", kick: "KeyF", potHeal: "Digit8", potShield: "Digit9", potSpeed: "Digit0", camera: "Tab" } });
 function loadSettings(): Settings { try { const raw = localStorage.getItem("sz_settings"); if (raw) { const p = JSON.parse(raw); return { ...defaultSettings(), ...p, binds: { ...defaultSettings().binds, ...(p.binds || {}) } }; } } catch {} return defaultSettings(); }
 function saveSettings(s: Settings) { try { localStorage.setItem("sz_settings", JSON.stringify(s)); } catch {} }
 function keyLabel(c: string) { const m: Record<string, string> = { Space: "Space", ShiftLeft: "Shift", ShiftRight: "RShift", ControlLeft: "Ctrl", ControlRight: "RCtrl", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" }; if (m[c]) return m[c]; return c.replace("Key", "").replace("Digit", ""); }
@@ -554,6 +554,18 @@ export default function Game() {
     const addHeal = (hId: string): boolean => { let i = state.inv.findIndex((s) => s.type === "heal" && s.hId === hId); if (i >= 0) { state.inv[i].count = (state.inv[i].count ?? 0) + 1; syncInv(); return true; } i = state.inv.findIndex((s) => s.type === "empty"); if (i < 0) return false; state.inv[i] = { type: "heal", hId, count: 1 }; syncInv(); return true; };
     const useSlot = (i: number) => { const s = state.inv[i]; if (!s || s.type === "empty") return; if (s.type === "weapon") { state.equip = i; state.reloading = false; setViewModel(s.wId!); syncInv(); syncHud(true); } else if (s.type === "heal") { if (state.hp >= 100) return; const h = HEALS[s.hId!]; state.hp = Math.min(100, state.hp + h.amt); s.count = (s.count ?? 1) - 1; if ((s.count ?? 0) <= 0) state.inv[i] = { type: "empty" }; sfx("heal"); showToast(`+${h.amt} HP`); syncInv(); syncHud(true); } };
     const cycleW = (dir: number) => { const wi = state.inv.map((s, idx) => (s.type === "weapon" ? idx : -1)).filter((x) => x >= 0); if (!wi.length) return; let k = wi.indexOf(state.equip); k = (k + dir + wi.length) % wi.length; state.equip = wi[k]; state.reloading = false; setViewModel(state.inv[state.equip].wId!); syncInv(); syncHud(true); };
+    // swap your equipped weapon for a weapon lying on the ground (works when inventory is full)
+    const swapWeapon = () => {
+      let gi = -1; let bd = 3.0; for (let i = 0; i < grounds.length; i++) { if (grounds[i].kind !== "weapon") continue; const d = grounds[i].pos.distanceTo(camera.position); if (d < bd) { bd = d; gi = i; } }
+      if (gi < 0) return;
+      const eq = state.inv[state.equip]; if (eq.type !== "weapon" || !eq.wId) return;
+      const g = grounds[gi]; const newId = g.id; const oldId = eq.wId;
+      state.inv[state.equip] = { type: "weapon", wId: newId, ammo: WEAPONS[newId].mag, reserve: WEAPONS[newId].mag * 2 };
+      setViewModel(newId);
+      const drop = g.pos.clone(); worldGrp.remove(g.group); g.group.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } }); grounds.splice(gi, 1);
+      dropGround("weapon", oldId, WEAPONS[oldId].rarity, drop); // old weapon drops where the new one was
+      sfx("loot"); showToast(`Swapped → ${WEAPONS[newId].name}`); syncInv(); syncHud(true);
+    };
     const rollRarity = (): Rarity => { const total = (Object.keys(RARITY) as Rarity[]).reduce((a, r) => a + RARITY[r].w, 0); let x = Math.random() * total; for (const r of Object.keys(RARITY) as Rarity[]) { x -= RARITY[r].w; if (x <= 0) return r; } return "common"; };
     const openChest = (c: Chest) => { if (c.opened) return; c.opened = true; c.glow.visible = false; c.lid.rotation.x = -1.7; const r = rollRarity(); const pool = r === "legendary" ? [...RAR_POOL.legendary, ...metaRef.current.weapons] : RAR_POOL[r]; const wId = pool[(Math.random() * pool.length) | 0]; if (!addWeapon(wId)) dropGround("weapon", wId, r, new THREE.Vector3(c.pos.x + 0.9, 0, c.pos.z)); giveAmmo(); const healId = Math.random() < 0.78 ? "bandaid" : "medkit"; if (!addHeal(healId)) dropGround("heal", healId, HEALS[healId].rarity, new THREE.Vector3(c.pos.x - 0.9, 0, c.pos.z)); sfx("loot"); showToast(`📦 ${WEAPONS[wId].name} (${r}) + ${HEALS[healId].name} + ammo`); };
 
@@ -566,7 +578,7 @@ export default function Game() {
     };
     const tryKick = () => { if (!soccer || soccer.kicking || !state.alive) return; if (camera.position.distanceTo(soccer.home) > 3.8) return; if (state.kills - state.lastKickKills < 4) return; soccer.kicking = true; soccer.kickStart = now(); state.invuln = true; sfx("shoot"); showToast("⚽ KICK!"); };
 
-    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === "Tab") e.preventDefault(); if (e.code === B.reload) reload(); if (e.code === B.swap) cycleW(1); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (e.code === B.potHeal) usePotion("health"); if (e.code === B.potShield) usePotion("shield"); if (e.code === B.potSpeed) usePotion("speed"); if (e.code === B.camera) state.camMode = (state.camMode + 1) % 3; if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
+    const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; const B = settingsRef.current.binds; if (e.code === "Tab") e.preventDefault(); if (e.code === B.reload) reload(); if (e.code === B.swap) swapWeapon(); if (e.code === B.changeSlot) cycleW(1); if (e.code === B.interact) tryInteract(); if (e.code === B.jump && state.canJump) { state.vel.y = 6.4; state.canJump = false; } if (e.code === B.kick) tryKick(); if (e.code === B.potHeal) usePotion("health"); if (e.code === B.potShield) usePotion("shield"); if (e.code === B.potSpeed) usePotion("speed"); if (e.code === B.camera) state.camMode = (state.camMode + 1) % 3; if (/^Digit[1-7]$/.test(e.code)) useSlot(+e.code.slice(5) - 1); };
     const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
     const onMouseDown = (e: MouseEvent) => { if (!controls.isLocked) return; if (e.button === 0) { state.mouseDown = true; if (!curW().auto) shoot(); } if (e.button === 2) state.ads = true; };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) state.mouseDown = false; if (e.button === 2) state.ads = false; };
@@ -606,7 +618,8 @@ export default function Game() {
       kick: () => tryKick(),
       cam: () => { state.camMode = (state.camMode + 1) % 3; },
       pause: () => { state.mouseDown = false; setPhase("paused"); },
-      swap: () => cycleW(1),
+      swap: () => swapWeapon(),
+      cycle: () => cycleW(1),
       slot: (i) => useSlot(i),
       sprintHold: (v) => { keys[settingsRef.current.binds.sprint] = v; },
       interact: () => tryInteract(),
@@ -663,6 +676,7 @@ export default function Game() {
         // interact prompt (chests + doors + soccer)
         let pr = ""; for (const c of chests) if (!c.opened && c.pos.distanceTo(camera.position) < 3.6) { pr = "open chest"; break; }
         if (!pr) for (const dr of doors) if (dr.pos.distanceTo(camera.position) < 3.4) { pr = dr.open ? "close door" : "open door"; break; }
+        if (!pr) for (const g of grounds) if (g.kind === "weapon" && g.pos.distanceTo(camera.position) < 3.0) { pr = "swap weapon"; break; }
         if (!pr && soccer && !soccer.kicking && camera.position.distanceTo(soccer.home) < 3.8) pr = state.kills - state.lastKickKills >= 4 ? "kick the ball ⚽ (F)" : `kill ${4 - (state.kills - state.lastKickKills)} more to unlock ⚽`;
         if (pr !== lastPrompt) { lastPrompt = pr; setPrompt(pr); }
         // soccer kick animation (invulnerable while it plays)
@@ -1047,7 +1061,8 @@ function TouchControls({ apiRef, potions, inv, equip }: { apiRef: React.MutableR
       <button className={`${b} absolute right-16 top-4 h-11 w-11 text-lg`} onPointerDown={(e) => { stop(e); api()?.cam(); }}>👁️</button>
       <button className={`${b} absolute right-28 top-4 h-11 w-12 text-sm`} onPointerDown={(e) => { stop(e); api()?.kick(); }}>⚽</button>
       <button className={`${b} absolute bottom-16 right-52 h-14 w-16 text-sm`} onPointerDown={(e) => { stop(e); api()?.interact(); }}>✋ USE</button>
-      <button className={`${b} absolute bottom-36 right-52 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.swap(); }}>🔀</button>
+      <button className={`${b} absolute bottom-36 right-52 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.cycle(); }} title="change slot">🔀</button>
+      <button className={`${b} absolute bottom-56 right-52 h-12 w-12 text-lg`} onPointerDown={(e) => { stop(e); api()?.swap(); }} title="swap weapon">⇄</button>
       <button className={`${b} absolute bottom-44 left-6 h-12 w-14 text-sm`} onPointerDown={(e) => { stop(e); api()?.sprintHold(true); }} onPointerUp={() => api()?.sprintHold(false)} onPointerCancel={() => api()?.sprintHold(false)}>🏃</button>
       {/* tappable inventory strip — change weapon / use items */}
       <div className="absolute left-1/2 top-3 flex -translate-x-1/2 gap-1">
