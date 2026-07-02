@@ -97,19 +97,25 @@ interface Meta { coins: number; skins: string[]; skin: string; weapons: string[]
 const defaultMeta = (): Meta => ({ coins: 0, skins: ["ranger"], skin: "ranger", weapons: [], potions: { health: 0, shield: 0, speed: 0 }, team: "", xp: 0, bp: false, bpFree: 0, bpPrem: 0 });
 const XP_PER = 1000; // xp per battle-pass tier
 const bpTier = (xp: number) => Math.min(100, Math.floor(xp / XP_PER));
-type BpRew = { kind: "coins" | "potion" | "skin" | "weapon"; id?: string; amount?: number; label: string; icon: string };
-const BP_SKIN_TIERS: Record<number, string> = { 15: "crimson", 30: "frost", 55: "golden", 80: "shadow", 100: "worldcup" };
-const BP_WEAPON_TIERS: Record<number, string> = { 40: "railgun", 70: "goldak" };
+type BpRew = { kind: "coins" | "potion" | "skin" | "weapon" | "crate"; id?: string; amount?: number; rarity?: Rarity; label: string; icon: string };
+const BP_SKIN_TIERS: Record<number, string> = { 15: "crimson", 30: "frost", 48: "neon", 62: "golden", 80: "shadow", 100: "worldcup" };
+// deeper tiers = better weapons; ⭐ mythics gated deep
+const BP_WEAPON_TIERS: Record<number, string> = { 5: "smg", 11: "shotgun", 20: "rifle", 27: "dmr", 40: "railgun", 52: "ak", 66: "lmg", 70: "goldak", 88: "sniper" };
+const BP_CRATE_TIERS: Record<number, Rarity> = { 8: "uncommon", 18: "rare", 25: "rare", 35: "epic", 45: "epic", 58: "epic", 72: "legendary", 85: "legendary", 95: "legendary" };
 const BP_PREM: BpRew[] = Array.from({ length: 100 }, (_, i) => { const t = i + 1;
   if (BP_SKIN_TIERS[t]) return { kind: "skin", id: BP_SKIN_TIERS[t], label: "Skin", icon: "🎨" };
-  if (BP_WEAPON_TIERS[t]) return { kind: "weapon", id: BP_WEAPON_TIERS[t], label: "Mythic", icon: "🔫" };
-  if (t % 10 === 0) return { kind: "coins", amount: 300, label: "300", icon: "🪙" };
-  if (t % 3 === 0) return { kind: "potion", id: ["health", "shield", "speed"][t % 3], label: "Potion", icon: "🧪" };
-  return { kind: "coins", amount: 120, label: "120", icon: "🪙" };
+  if (BP_WEAPON_TIERS[t]) { const myth = t === 40 || t === 70; return { kind: "weapon", id: BP_WEAPON_TIERS[t], label: myth ? "Mythic" : "Weapon", icon: myth ? "🌟" : "🔫" }; }
+  if (BP_CRATE_TIERS[t]) return { kind: "crate", rarity: BP_CRATE_TIERS[t], label: "Crate", icon: "📦" };
+  if (t % 25 === 0) return { kind: "coins", amount: 100, label: "100", icon: "🪙" };
+  if (t % 2 === 0) return { kind: "potion", id: ["health", "shield", "speed"][t % 3], label: "Potion", icon: "🧪" };
+  return { kind: "coins", amount: 30, label: "30", icon: "🪙" };
 });
+const BP_FREE_WEAPON: Record<number, string> = { 22: "smg", 60: "shotgun" };
+const BP_FREE_CRATE: Record<number, Rarity> = { 12: "common", 40: "uncommon", 75: "rare" };
 const BP_FREE: (BpRew | null)[] = Array.from({ length: 100 }, (_, i) => { const t = i + 1;
-  if (t % 25 === 0) return { kind: "potion", id: "shield", label: "Shield", icon: "🛡️" };
-  if (t % 10 === 0) return { kind: "coins", amount: 150, label: "150", icon: "🪙" };
+  if (BP_FREE_WEAPON[t]) return { kind: "weapon", id: BP_FREE_WEAPON[t], label: "Weapon", icon: "🔫" };
+  if (BP_FREE_CRATE[t]) return { kind: "crate", rarity: BP_FREE_CRATE[t], label: "Crate", icon: "📦" };
+  if (t % 20 === 0) return { kind: "coins", amount: 50, label: "50", icon: "🪙" };
   if (t % 5 === 0) return { kind: "potion", id: ["health", "shield", "speed"][t % 3], label: "Potion", icon: "🧪" };
   return null;
 });
@@ -118,6 +124,7 @@ function grantBp(m: Meta, r: BpRew) {
   else if (r.kind === "potion") m.potions[r.id!] = (m.potions[r.id!] || 0) + 1;
   else if (r.kind === "skin") { if (!m.skins.includes(r.id!)) m.skins.push(r.id!); }
   else if (r.kind === "weapon") { if (!m.weapons.includes(r.id!)) m.weapons.push(r.id!); }
+  else if (r.kind === "crate") { const rew = openCrateReward(r.rarity || "rare", m); if (rew.kind === "weapon") { if (!m.weapons.includes(rew.id)) m.weapons.push(rew.id); } else if (rew.kind === "skin") { if (!m.skins.includes(rew.id)) m.skins.push(rew.id); } else if (rew.kind === "potion") m.potions[rew.id] = (m.potions[rew.id] || 0) + 1; else m.coins += rew.amount || 0; }
 }
 function loadMeta(): Meta { try { const raw = localStorage.getItem("sz_meta"); if (raw) return { ...defaultMeta(), ...JSON.parse(raw) }; } catch {} return defaultMeta(); }
 function saveMeta(m: Meta) { try { localStorage.setItem("sz_meta", JSON.stringify(m)); } catch {} }
@@ -1075,7 +1082,7 @@ export default function Game() {
         const rew = (r: BpRew | null, on: boolean, prem: boolean) => (
           <div className={`flex h-14 w-14 flex-col items-center justify-center rounded-lg border text-center ${on ? "" : "opacity-40"} ${prem ? "border-yellow-400/50 bg-yellow-400/[0.06]" : "border-white/15 bg-white/[0.03]"}`}>
             <div className="text-lg leading-none">{r ? r.icon : ""}</div>
-            <div className="mt-0.5 text-[8px] leading-tight text-white/60">{r ? (r.kind === "coins" ? r.amount : r.kind === "skin" ? (SKINS[r.id!]?.name.split(" ")[0]) : r.kind === "weapon" ? WEAPONS[r.id!]?.abbr : r.label) : ""}</div>
+            <div className="mt-0.5 text-[8px] leading-tight" style={{ color: r?.kind === "crate" ? RARITY[r.rarity || "rare"].c : "rgba(255,255,255,0.6)" }}>{r ? (r.kind === "coins" ? r.amount : r.kind === "skin" ? (SKINS[r.id!]?.name.split(" ")[0]) : r.kind === "weapon" ? WEAPONS[r.id!]?.abbr : r.kind === "crate" ? (r.rarity || "").toUpperCase() : r.label) : ""}</div>
           </div>
         );
         return (
